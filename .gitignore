@@ -1,0 +1,10 @@
+node_modules/
+.pnpm-store/
+.turbo/
+.cache/
+.DS_Store
+
+# AI IDE
+.kilo
+.cursor
+
