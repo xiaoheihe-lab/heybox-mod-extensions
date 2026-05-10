@@ -6,7 +6,8 @@
     "lint": "pnpm -r lint",
     "test": "pnpm -r test",
     "build": "node internal/build/build.mjs",
-    "build:extension": "node internal/build/build.mjs"
+    "build:extension": "node internal/build/build.mjs",
+    "create": "node internal/create/create.mjs"
   },
   "devDependencies": {
     "typescript": "^5.7.0"

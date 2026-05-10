@@ -1,6 +1,6 @@
 import { build } from 'esbuild';
-import { readFileSync, readdirSync, existsSync } from 'fs';
-import { join, resolve } from 'path';
+import { readFileSync, readdirSync, existsSync, mkdirSync } from 'fs';
+import { join, resolve, basename } from 'path';
 import { fileURLToPath } from 'url';
 
 const __dirname = new URL('.', import.meta.url).pathname;
@@ -23,10 +23,25 @@ function readAppId(projectDir) {
   return pkg.appid;
 }
 
-async function buildProject(projectDir, repoRoot) {
+function readExtensionName(projectDir) {
+  return basename(projectDir);
+}
+
+async function buildProject(projectDir, repoRoot, { local = false } = {}) {
   const appid = readAppId(projectDir);
   const entryPoint = join(projectDir, 'index.ts');
-  const outfile = join(repoRoot, 'dist', `${appid}.cjs`);
+
+  let outfile, label;
+  if (local) {
+    const extName = readExtensionName(projectDir);
+    const extDistDir = join(repoRoot, 'extensions', extName, 'dist');
+    mkdirSync(extDistDir, { recursive: true });
+    outfile = join(extDistDir, `${appid}.js`);
+    label = `extensions/${extName}/dist/${appid}.js`;
+  } else {
+    outfile = join(repoRoot, 'dist', `${appid}.cjs`);
+    label = `dist/${appid}.cjs`;
+  }
 
   await build({
     entryPoints: [entryPoint],
@@ -36,22 +51,27 @@ async function buildProject(projectDir, repoRoot) {
     outfile,
     external: ['path'],
   });
-  console.log(`[build] ${projectDir} → dist/${appid}.cjs`);
+  console.log(`[build] ${projectDir} → ${label}`);
 }
 
 async function main() {
-  const arg = process.argv[2];
+  const args = process.argv.slice(2);
+  const local = args.includes('--local');
+  const arg = args.filter(a => a !== '--local')[0];
   const repoRoot = findRepoRoot(process.cwd());
 
   if (arg === '.') {
-    await buildProject(process.cwd(), repoRoot);
+    await buildProject(process.cwd(), repoRoot, { local });
   } else if (arg) {
     const projectDir = join(repoRoot, 'extensions', arg);
     if (!existsSync(join(projectDir, 'package.json'))) {
       console.error(`Extension "${arg}" not found (checked: ${projectDir})`);
       process.exit(1);
     }
-    await buildProject(projectDir, repoRoot);
+    await buildProject(projectDir, repoRoot, { local });
+  } else if (local) {
+    console.error('--local flag requires an extension name argument');
+    process.exit(1);
   } else {
     const extensionsDir = join(repoRoot, 'extensions');
     if (!existsSync(extensionsDir)) {

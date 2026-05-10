@@ -1,0 +1,96 @@
+name: Build Extensions
+
+on:
+  push:
+    branches:
+      - master
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Detect changed extensions
+        id: changes
+        run: |
+          set -e
+
+          BEFORE="${{ github.event.before }}"
+          AFTER="${{ github.sha }}"
+          ZERO="0000000000000000000000000000000000000000"
+
+          if [ "$BEFORE" = "$ZERO" ]; then
+            echo "::notice::First push detected, comparing with HEAD^"
+            BEFORE="$(git rev-parse HEAD^ || echo "$ZERO")"
+          fi
+
+          echo "## Changed files: $BEFORE → $AFTER"
+          CHANGED=$(git diff --name-only "$BEFORE" "$AFTER" 2>/dev/null || echo "")
+          echo "$CHANGED"
+          echo ""
+
+          if [ -z "$CHANGED" ]; then
+            echo "No files changed, skipping build"
+            echo "extensions=" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          EXTS=()
+          while IFS= read -r file; do
+            [ -z "$file" ] && continue
+            if [[ "$file" == extensions/* ]]; then
+              EXT_NAME=$(echo "$file" | cut -d'/' -f2)
+              if [[ ! " ${EXTS[@]} " =~ " ${EXT_NAME} " ]]; then
+                EXTS+=("$EXT_NAME")
+              fi
+            fi
+          done <<< "$CHANGED"
+
+          if [ ${#EXTS[@]} -eq 0 ]; then
+            echo "No extension files changed, skipping build"
+            echo "extensions=" >> $GITHUB_OUTPUT
+          else
+            echo "Changed extensions: ${EXTS[*]}"
+            echo "extensions=${EXTS[*]}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Build changed extensions
+        if: steps.changes.outputs.extensions != ''
+        run: |
+          for ext in ${{ steps.changes.outputs.extensions }}; do
+            echo "::group::Building extension: $ext"
+            node internal/build/build.mjs "$ext"
+            echo "::endgroup::"
+          done
+
+      - name: Commit and push dist
+        if: steps.changes.outputs.extensions != ''
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git add dist/
+
+          if git diff --cached --quiet; then
+            echo "No dist changes to commit"
+            exit 0
+          fi
+
+          git commit -m "build: update dist [skip ci]"
+          git push
