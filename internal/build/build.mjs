@@ -1,9 +1,6 @@
 import { build } from 'esbuild';
 import { readFileSync, readdirSync, existsSync, mkdirSync } from 'fs';
 import { join, resolve, basename } from 'path';
-import { fileURLToPath } from 'url';
-
-const __dirname = new URL('.', import.meta.url).pathname;
 
 function findRepoRoot(startDir) {
   let dir = resolve(startDir);
@@ -15,16 +12,58 @@ function findRepoRoot(startDir) {
   }
 }
 
-function readAppId(projectDir) {
+function readPackageJson(projectDir) {
   const pkgPath = join(projectDir, 'package.json');
   if (!existsSync(pkgPath)) throw new Error(`No package.json found in ${projectDir}`);
-  const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8'));
+  return JSON.parse(readFileSync(pkgPath, 'utf-8'));
+}
+
+function validateAppId(appid, pkgPath) {
+  if (!/^[1-9]\d*$/.test(String(appid))) {
+    throw new Error(`Invalid "appid" in ${pkgPath}: expected a positive integer string`);
+  }
+}
+
+function readAppId(projectDir) {
+  const pkgPath = join(projectDir, 'package.json');
+  const pkg = readPackageJson(projectDir);
   if (!pkg.appid) throw new Error(`No "appid" field in ${pkgPath}`);
-  return pkg.appid;
+  validateAppId(pkg.appid, pkgPath);
+  return String(pkg.appid);
 }
 
 function readExtensionName(projectDir) {
   return basename(projectDir);
+}
+
+function listExtensionProjects(repoRoot) {
+  const extensionsDir = join(repoRoot, 'extensions');
+  if (!existsSync(extensionsDir)) return [];
+
+  return readdirSync(extensionsDir, { withFileTypes: true })
+    .filter(entry => entry.isDirectory())
+    .map(entry => join(extensionsDir, entry.name))
+    .filter(projectDir => existsSync(join(projectDir, 'package.json')));
+}
+
+function assertUniqueAppIds(repoRoot) {
+  const byAppId = new Map();
+
+  for (const projectDir of listExtensionProjects(repoRoot)) {
+    const appid = readAppId(projectDir);
+    const extensionName = readExtensionName(projectDir);
+    const existing = byAppId.get(appid) ?? [];
+    existing.push(extensionName);
+    byAppId.set(appid, existing);
+  }
+
+  const duplicates = [...byAppId.entries()]
+    .filter(([, extensionNames]) => extensionNames.length > 1)
+    .map(([appid, extensionNames]) => `${appid}: ${extensionNames.join(', ')}`);
+
+  if (duplicates.length > 0) {
+    throw new Error(`Duplicate appid detected. Refusing to build:\n${duplicates.join('\n')}`);
+  }
 }
 
 async function buildProject(projectDir, repoRoot, { local = false } = {}) {
@@ -59,6 +98,7 @@ async function main() {
   const local = args.includes('--local');
   const arg = args.filter(a => a !== '--local')[0];
   const repoRoot = findRepoRoot(process.cwd());
+  assertUniqueAppIds(repoRoot);
 
   if (arg === '.') {
     await buildProject(process.cwd(), repoRoot, { local });

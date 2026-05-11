@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'fs';
 import { join, resolve } from 'path';
 import { createInterface } from 'readline';
 
@@ -33,6 +33,50 @@ function toKebabCase(str) {
 function generatePackageName(dirname) {
   const kebab = toKebabCase(dirname);
   return `@heybox-mod-extensions/${kebab}`;
+}
+
+function validateDirname(dirname) {
+  if (!/^[A-Z][A-Za-z0-9]*$/.test(dirname)) {
+    throw new Error(
+      'dirname 必须使用 PascalCase，仅包含英文字母和数字，并以大写字母开头，例如 SlayTheSpire2'
+    );
+  }
+}
+
+function validateAppId(appid) {
+  if (!/^[1-9]\d*$/.test(appid)) {
+    throw new Error('appid 必须是正整数，例如 2868840');
+  }
+}
+
+function readExtensionPackage(extensionDir) {
+  const pkgPath = join(extensionDir, 'package.json');
+  if (!existsSync(pkgPath)) return null;
+  return JSON.parse(readFileSync(pkgPath, 'utf-8'));
+}
+
+function listExtensionDirs(repoRoot) {
+  const extensionsDir = join(repoRoot, 'extensions');
+  if (!existsSync(extensionsDir)) return [];
+  return readdirSync(extensionsDir, { withFileTypes: true })
+    .filter(entry => entry.isDirectory())
+    .map(entry => ({
+      name: entry.name,
+      dir: join(extensionsDir, entry.name),
+    }));
+}
+
+function assertUniqueExtension(repoRoot, dirname, appid) {
+  for (const extension of listExtensionDirs(repoRoot)) {
+    if (extension.name.toLowerCase() === dirname.toLowerCase()) {
+      throw new Error(`extensions/${extension.name} 已存在，不能重复创建 dirname`);
+    }
+
+    const pkg = readExtensionPackage(extension.dir);
+    if (String(pkg?.appid ?? '') === appid) {
+      throw new Error(`appid ${appid} 已被 extensions/${extension.name} 使用，不能重复创建`);
+    }
+  }
 }
 
 function copyTemplate(repoRoot, dirname, appid) {
@@ -77,6 +121,7 @@ async function main() {
     console.error('❌ 目录名不能为空');
     process.exit(1);
   }
+  validateDirname(dirname);
 
   if (!appid) {
     appid = await prompt('请输入 appid: ');
@@ -85,6 +130,8 @@ async function main() {
     console.error('❌ appid 不能为空');
     process.exit(1);
   }
+  validateAppId(appid);
+  assertUniqueExtension(repoRoot, dirname, appid);
 
   const targetDir = join(repoRoot, 'extensions', dirname);
   if (existsSync(targetDir)) {
