@@ -10,6 +10,7 @@
     "test": "echo \"no tests\""
   },
   "devDependencies": {
+    "heybox-mod-api": "0.0.1-alpha1",
     "typescript": "^5.7.0"
   }
 }

@@ -1,5 +1,5 @@
 // @ts-nocheck
-import type { IExtensionContext } from '../types/extension';
+import type { IExtensionContext } from 'heybox-mod-api';
 import path from 'path';
 
 // 游戏信息

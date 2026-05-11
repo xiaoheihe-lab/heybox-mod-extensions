@@ -53,12 +53,12 @@ pnpm create --dirname <GameName> --appid <steamAppId>
 
 | 参数 | 类型 | 要求 | 示例 |
 |------|------|------|------|
-| `--dirname` | 字符串 | 推荐**大驼峰**（PascalCase），与游戏正式名称一致 | `SlayTheSpire2`、`BaldursGate3` |
-| `--appid` | 字符串 | Steam App ID，可在 Steam 商店页面 URL 或 [SteamDB](https://steamdb.info/) 获取 | `2868840`、`1086940` |
+| `--dirname` | 字符串 | 必须**大驼峰**（PascalCase），仅包含英文字母和数字，且不能与已有 extension 重复 | `SlayTheSpire2`、`BaldursGate3` |
+| `--appid` | 字符串 | 必须为正整数，且不能与已有 extension 重复；可在 Steam 商店页面 URL 或 [SteamDB](https://steamdb.info/) 获取 | `2868840`、`1086940` |
 
 **命名约定：**
-- `dirname` 使用大驼峰格式（每个单词首字母大写，无空格无下划线）：`SlayTheSpire2`、`EldenRing`、`BlackMythWukong`
-- `appid` 为 Steam 平台的游戏唯一数字 ID
+- `dirname` 使用大驼峰格式（每个单词首字母大写，无空格无下划线），并且在 `extensions/` 下唯一：`SlayTheSpire2`、`EldenRing`、`BlackMythWukong`
+- `appid` 为 Steam 平台的游戏唯一数字 ID，仓库内不能重复
 - `package.json` 的 `name` 字段会自动转为 kebab-case：`SlayTheSpire2` → `@heybox-mod-extensions/slay-the-spire2`
 
 **示例：**
@@ -123,7 +123,7 @@ pnpm build
 | 层级 | 路径 | 谁生成 | 触发时机 |
 |------|------|--------|----------|
 | 本地构建 | `extensions/<name>/dist/<appid>.js` | 开发者本地 | `pnpm build` |
-| 发布制品 | `dist/<appid>.cjs` | CI 机器人 | 合并到 master 后 |
+| 发布制品 | `dist/<appid>.cjs` | CI 机器人 | 合并到 main 后 |
 
 #### 本地开发
 
@@ -140,8 +140,8 @@ pnpm build
 
 #### CI 自动构建
 
-当 PR 被合并到 `master` 后，GitHub Actions 自动执行：
+当 PR 被合并到 `main` 后，GitHub Actions 自动执行：
 
 1. 检测本次合并中变更的 extension
 2. 对变更的 extension 执行增量构建
-3. 将产物 `dist/<appid>.cjs` 提交回 `master` 分支
+3. 将产物 `dist/<appid>.cjs` 提交回 `main` 分支
