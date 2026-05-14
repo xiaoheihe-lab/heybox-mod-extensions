@@ -1,5 +1,5 @@
 import { build } from 'esbuild';
-import { readFileSync, readdirSync, existsSync, mkdirSync } from 'fs';
+import { readFileSync, readdirSync, existsSync, mkdirSync, writeFileSync } from 'fs';
 import { join, resolve, basename } from 'path';
 
 function findRepoRoot(startDir) {
@@ -18,18 +18,57 @@ function readPackageJson(projectDir) {
   return JSON.parse(readFileSync(pkgPath, 'utf-8'));
 }
 
-function validateAppId(appid, pkgPath) {
+function readManifestJson(projectDir) {
+  const manifestPath = join(projectDir, 'manifest.json');
+  if (!existsSync(manifestPath)) throw new Error(`No manifest.json found in ${projectDir}`);
+  return JSON.parse(readFileSync(manifestPath, 'utf-8'));
+}
+
+function validateAppId(appid, sourcePath) {
   if (!/^[1-9]\d*$/.test(String(appid))) {
-    throw new Error(`Invalid "appid" in ${pkgPath}: expected a positive integer string`);
+    throw new Error(`Invalid "appid" in ${sourcePath}: expected a positive integer string`);
+  }
+}
+
+function validateApiVersion(apiVersion, sourcePath) {
+  if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/.test(apiVersion)) {
+    throw new Error(`Invalid "api_version" from ${sourcePath}: expected an exact semver version, for example 1.6.0-alpha1`);
   }
 }
 
 function readAppId(projectDir) {
+  const manifestPath = join(projectDir, 'manifest.json');
+  const manifest = readManifestJson(projectDir);
+  if (!manifest.appid) throw new Error(`No "appid" field in ${manifestPath}`);
+  validateAppId(manifest.appid, manifestPath);
+  return String(manifest.appid);
+}
+
+function readApiVersion(projectDir) {
+  const manifestPath = join(projectDir, 'manifest.json');
   const pkgPath = join(projectDir, 'package.json');
+  const manifest = readManifestJson(projectDir);
   const pkg = readPackageJson(projectDir);
-  if (!pkg.appid) throw new Error(`No "appid" field in ${pkgPath}`);
-  validateAppId(pkg.appid, pkgPath);
-  return String(pkg.appid);
+  const apiVersion = manifest.api_version
+    ?? pkg.dependencies?.['heybox-mod-api']
+    ?? pkg.devDependencies?.['heybox-mod-api']
+    ?? pkg.peerDependencies?.['heybox-mod-api'];
+
+  if (typeof apiVersion !== 'string' || apiVersion.length === 0) {
+    throw new Error(`No "api_version" in ${manifestPath}, and no heybox-mod-api version found in ${pkgPath}`);
+  }
+  validateApiVersion(apiVersion, manifest.api_version ? manifestPath : pkgPath);
+
+  return apiVersion;
+}
+
+function readOutputManifest(projectDir) {
+  const manifest = readManifestJson(projectDir);
+  return {
+    ...manifest,
+    appid: readAppId(projectDir),
+    api_version: readApiVersion(projectDir),
+  };
 }
 
 function readExtensionName(projectDir) {
@@ -67,20 +106,21 @@ function assertUniqueAppIds(repoRoot) {
 }
 
 async function buildProject(projectDir, repoRoot, { local = false } = {}) {
-  const appid = readAppId(projectDir);
+  const outputManifest = readOutputManifest(projectDir);
   const entryPoint = join(projectDir, 'index.ts');
+  const extName = readExtensionName(projectDir);
 
-  let outfile, label;
+  let outdir, outfile, label;
   if (local) {
-    const extName = readExtensionName(projectDir);
-    const extDistDir = join(repoRoot, 'extensions', extName, 'dist');
-    mkdirSync(extDistDir, { recursive: true });
-    outfile = join(extDistDir, `${appid}.js`);
-    label = `extensions/${extName}/dist/${appid}.js`;
+    outdir = join(repoRoot, 'extensions', extName, 'dist', extName);
+    outfile = join(outdir, 'index.cjs');
+    label = `extensions/${extName}/dist/${extName}/index.cjs`;
   } else {
-    outfile = join(repoRoot, 'dist', `${appid}.cjs`);
-    label = `dist/${appid}.cjs`;
+    outdir = join(repoRoot, 'dist', extName);
+    outfile = join(outdir, 'index.cjs');
+    label = `dist/${extName}/index.cjs`;
   }
+  mkdirSync(outdir, { recursive: true });
 
   await build({
     entryPoints: [entryPoint],
@@ -90,6 +130,7 @@ async function buildProject(projectDir, repoRoot, { local = false } = {}) {
     outfile,
     external: ['path'],
   });
+  writeFileSync(join(outdir, 'manifest.json'), `${JSON.stringify(outputManifest, null, 2)}\n`, 'utf-8');
   console.log(`[build] ${projectDir} → ${label}`);
 }
 
