@@ -49,10 +49,10 @@ function validateAppId(appid) {
   }
 }
 
-function readExtensionPackage(extensionDir) {
-  const pkgPath = join(extensionDir, 'package.json');
-  if (!existsSync(pkgPath)) return null;
-  return JSON.parse(readFileSync(pkgPath, 'utf-8'));
+function readExtensionManifest(extensionDir) {
+  const manifestPath = join(extensionDir, 'manifest.json');
+  if (!existsSync(manifestPath)) return null;
+  return JSON.parse(readFileSync(manifestPath, 'utf-8'));
 }
 
 function listExtensionDirs(repoRoot) {
@@ -72,8 +72,8 @@ function assertUniqueExtension(repoRoot, dirname, appid) {
       throw new Error(`extensions/${extension.name} 已存在，不能重复创建 dirname`);
     }
 
-    const pkg = readExtensionPackage(extension.dir);
-    if (String(pkg?.appid ?? '') === appid) {
+    const manifest = readExtensionManifest(extension.dir);
+    if (String(manifest?.appid ?? '') === appid) {
       throw new Error(`appid ${appid} 已被 extensions/${extension.name} 使用，不能重复创建`);
     }
   }
@@ -94,6 +94,8 @@ function copyTemplate(repoRoot, dirname, appid) {
     content = content.replace(/\{\{APPID\}\}/g, appid);
     writeFileSync(join(targetDir, file), content, 'utf-8');
   }
+
+  writeFileSync(join(targetDir, 'manifest.json'), `${JSON.stringify({ appid }, null, 2)}\n`, 'utf-8');
 }
 
 function parseArgs(args) {

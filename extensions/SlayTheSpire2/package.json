@@ -2,7 +2,6 @@
   "name": "@heybox-mod-extensions/slay-the-spire-2",
   "version": "1.0.0",
   "private": true,
-  "appid": "2868840",
   "scripts": {
     "build": "node ../../internal/build/build.mjs . --local",
     "build:extension": "node ../../internal/build/build.mjs .",
@@ -10,7 +9,7 @@
     "test": "echo \"no tests\""
   },
   "devDependencies": {
-    "heybox-mod-api": "0.0.1-alpha1",
+    "heybox-mod-api": "1.6.0-alpha1",
     "typescript": "^5.7.0"
   }
 }
