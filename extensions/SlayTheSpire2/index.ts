@@ -153,15 +153,15 @@ const spec = {
 };
 
 async function makeFindGame(api: any, gameSpec: any): Promise<string | undefined> {
-  const result = await api.util.GameStoreHelper.findByAppId(gameSpec.game.id);
-  return result?.gamePath;
+  const game = await api.util.GameStoreHelper.findByAppId(gameSpec.game.id);
+  return game?.gamePath;
 }
 
 async function applyGame(context: IExtensionContext, gameSpec: any) {
   console.log('apply game and doing something here', context);
   const game = {
     ...gameSpec.game,
-    gamePath: await makeFindGame(context.api, gameSpec),
+    queryPath: () => makeFindGame(context.api, gameSpec),
     executable: () => gameSpec.game.executable,
   };
   context.registerGame(game);
@@ -172,7 +172,7 @@ async function applyGame(context: IExtensionContext, gameSpec: any) {
     context.registerModType(
       String(type.id),
       priority,
-      (gameId: number) => gameId === gameSpec.game.id && !!game.gamePath,
+      (gameId: number) => gameId === gameSpec.game.id,
       (_g: any) => String(type.targetPath ?? ''),
       () => Promise.resolve(false),
       { name: type.name }
