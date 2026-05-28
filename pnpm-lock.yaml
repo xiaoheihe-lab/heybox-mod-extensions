@@ -12,6 +12,15 @@ importers:
         specifier: ^5.7.0
         version: 5.9.3
 
+  extensions/RimWorld:
+    devDependencies:
+      heybox-mod-api:
+        specifier: 1.6.0-alpha1
+        version: 1.6.0-alpha1
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
+
   extensions/SlayTheSpire2:
     devDependencies:
       heybox-mod-api:
