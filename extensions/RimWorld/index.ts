@@ -1,4 +1,6 @@
-import type { IExtensionContext, DeploymentOptions } from 'heybox-mod-api'
+import fs from 'fs'
+import path from 'path'
+import type { IExtensionContext } from 'heybox-mod-api'
 
 const GAME_ID = 294100
 const MOD_TYPE_ID = 'rimworld-steam-mod'
@@ -22,8 +24,8 @@ function archiveBaseName(filePath: string): string {
   return segments[segments.length - 1] || ''
 }
 
-function hasFileExtension(context: IExtensionContext, filePath: string): boolean {
-  return context.api.util.path.extname(archiveBaseName(filePath)) !== ''
+function hasFileExtension(filePath: string): boolean {
+  return path.extname(archiveBaseName(filePath)) !== ''
 }
 
 function sanitizeFileName(context: IExtensionContext, name: string): string {
@@ -35,7 +37,7 @@ function toDestinationPath(context: IExtensionContext, segments: string[]): stri
   if (safeSegments.length === 0) {
     throw new Error('Archive destination path is empty')
   }
-  return context.api.util.path.join(...safeSegments)
+  return path.join(...safeSegments)
 }
 
 async function findGame(context: IExtensionContext): Promise<string | undefined> {
@@ -72,13 +74,15 @@ function readPackageId(parsedXml: Record<string, unknown>): string | undefined {
 async function getModNameFromAboutXml(
   context: IExtensionContext,
   aboutFile: string,
-  options?: DeploymentOptions
+  stagingPath?: string,
+  options?: { sourcePathByFile?: Record<string, string> }
 ): Promise<string | undefined> {
   const sourcePath = options?.sourcePathByFile?.[aboutFile]
+    || (stagingPath ? path.join(stagingPath, ...getArchiveSegments(aboutFile)) : undefined)
   if (!sourcePath) return undefined
 
   try {
-    const fileData = await context.api.util.fs.readFileAsync(sourcePath, { encoding: 'utf8' })
+    const fileData = await fs.promises.readFile(sourcePath, { encoding: 'utf8' })
     const parsed = await context.api.util.fileParseApi.parseXmlToObject(fileData)
     return readPackageId(parsed)
   } catch {
@@ -86,29 +90,29 @@ async function getModNameFromAboutXml(
   }
 }
 
-function testSupportedSteamMod(
+async function testSupportedSteamMod(
   _context: IExtensionContext,
   files: string[],
   gameId: number
 ): Promise<{ supported: boolean; requiredFiles: string[] }> {
   if (Number(gameId) !== GAME_ID) {
-    return Promise.resolve({ supported: false, requiredFiles: [] })
+    return { supported: false, requiredFiles: [] }
   }
 
   const aboutFiles = files.filter(isAboutFile)
   if (aboutFiles.length === 0) {
-    return Promise.resolve({ supported: false, requiredFiles: [] })
+    return { supported: false, requiredFiles: [] }
   }
 
   if (aboutFiles.length > 1) {
     console.warn('RimWorld installer skipped archive with multiple About.xml files.')
-    return Promise.resolve({ supported: false, requiredFiles: [] })
+    return { supported: false, requiredFiles: [] }
   }
 
-  return Promise.resolve({ supported: true, requiredFiles: [] })
+  return { supported: true, requiredFiles: [] }
 }
 
-async function installSteamMod(context: IExtensionContext, files: string[], options?: DeploymentOptions): Promise<{
+async function installSteamMod(context: IExtensionContext, files: string[], stagingPath?: string, options?: { sourcePathByFile?: Record<string, string> }): Promise<{
   instructions: Array<{ type: 'copy'; source: string; destination: string }>
 }> {
   const aboutFile = files.find(isAboutFile)
@@ -117,11 +121,11 @@ async function installSteamMod(context: IExtensionContext, files: string[], opti
   }
   const rootSegment = getRootSegment(files, aboutFile)
   const looseRootArchive = isLooseRootArchive(files)
-  const modNameFromAbout = await getModNameFromAboutXml(context, aboutFile, options)
+  const modNameFromAbout = await getModNameFromAboutXml(context, aboutFile, stagingPath, options)
   const modName = sanitizeFileName(context, modNameFromAbout || rootSegment || 'rimworld_mod')
   const filtered = files.filter((filePath) => {
     const baseName = archiveBaseName(filePath).toLowerCase()
-    return !/[\\/]$/.test(filePath) && hasFileExtension(context, filePath) && !GIT_FILES.has(baseName)
+    return !/[\\/]$/.test(filePath) && hasFileExtension(filePath) && !GIT_FILES.has(baseName)
   })
 
   const instructions = filtered.map((file) => {
@@ -182,7 +186,11 @@ async function main(context: IExtensionContext): Promise<boolean> {
     MOD_TYPE_ID,
     25,
     (files, gameId) => testSupportedSteamMod(context, files, gameId),
-    (files, options) => installSteamMod(context, files, options)
+    (files, stagingPathOrOptions, maybeOptions) => {
+      const stagingPath = typeof stagingPathOrOptions === 'string' ? stagingPathOrOptions : undefined
+      const options = typeof stagingPathOrOptions === 'string' ? maybeOptions : stagingPathOrOptions
+      return installSteamMod(context, files, stagingPath, options)
+    }
   )
 
   return true

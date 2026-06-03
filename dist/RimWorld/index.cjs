@@ -1,7 +1,9 @@
 "use strict";
+var __create = Object.create;
 var __defProp = Object.defineProperty;
 var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
 var __getOwnPropNames = Object.getOwnPropertyNames;
+var __getProtoOf = Object.getPrototypeOf;
 var __hasOwnProp = Object.prototype.hasOwnProperty;
 var __export = (target, all) => {
   for (var name in all)
@@ -15,14 +17,24 @@ var __copyProps = (to, from, except, desc) => {
   }
   return to;
 };
+var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__getProtoOf(mod)) : {}, __copyProps(
+  // If the importer is in node compatibility mode or this is not an ESM
+  // file that has been converted to a CommonJS file using a Babel-
+  // compatible transform (i.e. "__esModule" has not been set), then set
+  // "default" to the CommonJS "module.exports" for node compatibility.
+  isNodeMode || !mod || !mod.__esModule ? __defProp(target, "default", { value: mod, enumerable: true }) : target,
+  mod
+));
 var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
 
-// index.ts
+// extensions/RimWorld/index.ts
 var index_exports = {};
 __export(index_exports, {
   default: () => index_default
 });
 module.exports = __toCommonJS(index_exports);
+var import_fs = __toESM(require("fs"));
+var import_path = __toESM(require("path"));
 var GAME_ID = 294100;
 var MOD_TYPE_ID = "rimworld-steam-mod";
 var ABOUT_XML_FILE = "about.xml";
@@ -42,8 +54,8 @@ function archiveBaseName(filePath) {
   const segments = getArchiveSegments(filePath);
   return segments[segments.length - 1] || "";
 }
-function hasFileExtension(context, filePath) {
-  return context.api.util.path.extname(archiveBaseName(filePath)) !== "";
+function hasFileExtension(filePath) {
+  return import_path.default.extname(archiveBaseName(filePath)) !== "";
 }
 function sanitizeFileName(context, name) {
   return context.api.util.sanitizeFilename(name, "rimworld_mod").replace(/\./g, "_");
@@ -53,7 +65,7 @@ function toDestinationPath(context, segments) {
   if (safeSegments.length === 0) {
     throw new Error("Archive destination path is empty");
   }
-  return context.api.util.path.join(...safeSegments);
+  return import_path.default.join(...safeSegments);
 }
 async function findGame(context) {
   const game = await context.api.util.GameStoreHelper.findByAppId(GAME_ID);
@@ -81,43 +93,43 @@ function readPackageId(parsedXml) {
   if (Array.isArray(packageId)) return typeof packageId[0] === "string" ? packageId[0] : void 0;
   return typeof packageId === "string" ? packageId : void 0;
 }
-async function getModNameFromAboutXml(context, aboutFile, options) {
-  const sourcePath = options?.sourcePathByFile?.[aboutFile];
+async function getModNameFromAboutXml(context, aboutFile, stagingPath, options) {
+  const sourcePath = options?.sourcePathByFile?.[aboutFile] || (stagingPath ? import_path.default.join(stagingPath, ...getArchiveSegments(aboutFile)) : void 0);
   if (!sourcePath) return void 0;
   try {
-    const fileData = await context.api.util.fs.readFileAsync(sourcePath, { encoding: "utf8" });
+    const fileData = await import_fs.default.promises.readFile(sourcePath, { encoding: "utf8" });
     const parsed = await context.api.util.fileParseApi.parseXmlToObject(fileData);
     return readPackageId(parsed);
   } catch {
     return void 0;
   }
 }
-function testSupportedSteamMod(_context, files, gameId) {
+async function testSupportedSteamMod(_context, files, gameId) {
   if (Number(gameId) !== GAME_ID) {
-    return Promise.resolve({ supported: false, requiredFiles: [] });
+    return { supported: false, requiredFiles: [] };
   }
   const aboutFiles = files.filter(isAboutFile);
   if (aboutFiles.length === 0) {
-    return Promise.resolve({ supported: false, requiredFiles: [] });
+    return { supported: false, requiredFiles: [] };
   }
   if (aboutFiles.length > 1) {
     console.warn("RimWorld installer skipped archive with multiple About.xml files.");
-    return Promise.resolve({ supported: false, requiredFiles: [] });
+    return { supported: false, requiredFiles: [] };
   }
-  return Promise.resolve({ supported: true, requiredFiles: [] });
+  return { supported: true, requiredFiles: [] };
 }
-async function installSteamMod(context, files, options) {
+async function installSteamMod(context, files, stagingPath, options) {
   const aboutFile = files.find(isAboutFile);
   if (!aboutFile) {
     return { instructions: [] };
   }
   const rootSegment = getRootSegment(files, aboutFile);
   const looseRootArchive = isLooseRootArchive(files);
-  const modNameFromAbout = await getModNameFromAboutXml(context, aboutFile, options);
+  const modNameFromAbout = await getModNameFromAboutXml(context, aboutFile, stagingPath, options);
   const modName = sanitizeFileName(context, modNameFromAbout || rootSegment || "rimworld_mod");
   const filtered = files.filter((filePath) => {
     const baseName = archiveBaseName(filePath).toLowerCase();
-    return !/[\\/]$/.test(filePath) && hasFileExtension(context, filePath) && !GIT_FILES.has(baseName);
+    return !/[\\/]$/.test(filePath) && hasFileExtension(filePath) && !GIT_FILES.has(baseName);
   });
   const instructions = filtered.map((file) => {
     const fileSegments = getArchiveSegments(file);
@@ -171,7 +183,11 @@ async function main(context) {
     MOD_TYPE_ID,
     25,
     (files, gameId) => testSupportedSteamMod(context, files, gameId),
-    (files, options) => installSteamMod(context, files, options)
+    (files, stagingPathOrOptions, maybeOptions) => {
+      const stagingPath = typeof stagingPathOrOptions === "string" ? stagingPathOrOptions : void 0;
+      const options = typeof stagingPathOrOptions === "string" ? maybeOptions : stagingPathOrOptions;
+      return installSteamMod(context, files, stagingPath, options);
+    }
   );
   return true;
 }
