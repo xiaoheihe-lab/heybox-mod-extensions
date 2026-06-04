@@ -107,8 +107,14 @@ function assertUniqueAppIds(repoRoot) {
 
 async function buildProject(projectDir, repoRoot, { local = false } = {}) {
   const outputManifest = readOutputManifest(projectDir);
-  const entryPoint = join(projectDir, 'index.ts');
+  const rootEntryPoint = join(projectDir, 'index.ts');
+  const srcEntryPoint = join(projectDir, 'src', 'index.ts');
+  const entryPoint = existsSync(rootEntryPoint) ? rootEntryPoint : srcEntryPoint;
   const extName = readExtensionName(projectDir);
+
+  if (!existsSync(entryPoint)) {
+    throw new Error(`No extension entry found in ${projectDir}; expected index.ts or src/index.ts`);
+  }
 
   let outdir, outfile, label;
   if (local) {
