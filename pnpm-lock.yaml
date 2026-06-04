@@ -30,6 +30,24 @@ importers:
         specifier: ^5.7.0
         version: 5.9.3
 
+  extensions/StardewValley:
+    devDependencies:
+      heybox-mod-api:
+        specifier: 1.7.0-alpha1
+        version: 1.7.0-alpha1
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
+
+  extensions/WitchsApocalypticJourney:
+    devDependencies:
+      heybox-mod-api:
+        specifier: 1.6.0-alpha1
+        version: 1.6.0-alpha1
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
+
   internal/build:
     dependencies:
       esbuild:
@@ -211,6 +229,9 @@ packages:
   heybox-mod-api@1.6.0-alpha1:
     resolution: {integrity: sha512-za1fIKxTwC/6VCDsHuu4nL34Z6LPjODJ4t495UExwphsgKMtU/IY7m9OO73wx4bl3iVPcFhUkMFamkza2Fn2Cg==}
 
+  heybox-mod-api@1.7.0-alpha1:
+    resolution: {integrity: sha512-Hqe3hglwAf1MDaL122qUdHUiQBPauWH/jicDuHDBPezhWx4jptIij3LxAXngNxHLhX2X511eZS78o/cIed3mpg==}
+
   typescript@5.9.3:
     resolution: {integrity: sha512-jl1vZzPDinLr9eUt3J/t7V6FgNEw9QjvBPdysz9KfQDD41fQrC2Y4vKQdiaUpFT4bXlb1RHhLpp8wtm6M5TgSw==}
     engines: {node: '>=14.17'}
@@ -326,5 +347,7 @@ snapshots:
       '@esbuild/win32-x64': 0.25.12
 
   heybox-mod-api@1.6.0-alpha1: {}
+
+  heybox-mod-api@1.7.0-alpha1: {}
 
   typescript@5.9.3: {}
