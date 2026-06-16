@@ -22,9 +22,62 @@ export function isManifest(file: string): boolean {
   return !parts.includes('i18n') && !parts.includes('locale') && !parts.includes('locales')
 }
 
+function stripJsonComments(input: string): string {
+  let output = ''
+  let inString = false
+  let escaped = false
+
+  for (let i = 0; i < input.length; i++) {
+    const char = input[i]
+    const next = input[i + 1]
+
+    if (inString) {
+      output += char
+      if (escaped) {
+        escaped = false
+      } else if (char === '\\') {
+        escaped = true
+      } else if (char === '"') {
+        inString = false
+      }
+      continue
+    }
+
+    if (char === '"') {
+      inString = true
+      output += char
+      continue
+    }
+
+    if (char === '/' && next === '/') {
+      i += 2
+      while (i < input.length && input[i] !== '\n' && input[i] !== '\r') i++
+      i--
+      continue
+    }
+
+    if (char === '/' && next === '*') {
+      i += 2
+      while (i < input.length && !(input[i] === '*' && input[i + 1] === '/')) i++
+      if (i >= input.length) throw new Error('Unterminated block comment')
+      i++
+      continue
+    }
+
+    output += char
+  }
+
+  return output
+}
+
 export function parseManifestFile(filePath: string): StardewManifest {
   const raw = fs.readFileSync(filePath, 'utf8').replace(/^\uFEFF/, '')
-  const parsed = JSON.parse(raw)
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw)
+  } catch {
+    parsed = JSON.parse(stripJsonComments(raw))
+  }
   if (!parsed || typeof parsed !== 'object') throw new Error(`Invalid Stardew manifest: ${filePath}`)
   return parsed
 }
