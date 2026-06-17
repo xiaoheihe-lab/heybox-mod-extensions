@@ -12,6 +12,106 @@ importers:
         specifier: ^5.7.0
         version: 5.9.3
 
+  extensions/DarkestDungeon:
+    devDependencies:
+      heybox-mod-api:
+        specifier: 1.7.0-alpha1
+        version: 1.7.0-alpha1
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
+
+  extensions/MonsterHunterRise:
+    dependencies:
+      '@heybox-mod-extensions/engine-utils':
+        specifier: workspace:*
+        version: link:../../utils/engine-utils
+    devDependencies:
+      heybox-mod-api:
+        specifier: 1.7.0
+        version: 1.7.0
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
+
+  extensions/MonsterHunterWilds:
+    dependencies:
+      '@heybox-mod-extensions/engine-utils':
+        specifier: workspace:*
+        version: link:../../utils/engine-utils
+    devDependencies:
+      heybox-mod-api:
+        specifier: 1.7.0
+        version: 1.7.0
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
+
+  extensions/ResidentEvil2:
+    dependencies:
+      '@heybox-mod-extensions/engine-utils':
+        specifier: workspace:*
+        version: link:../../utils/engine-utils
+    devDependencies:
+      heybox-mod-api:
+        specifier: 1.7.0
+        version: 1.7.0
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
+
+  extensions/ResidentEvil3:
+    dependencies:
+      '@heybox-mod-extensions/engine-utils':
+        specifier: workspace:*
+        version: link:../../utils/engine-utils
+    devDependencies:
+      heybox-mod-api:
+        specifier: 1.7.0
+        version: 1.7.0
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
+
+  extensions/ResidentEvil4:
+    dependencies:
+      '@heybox-mod-extensions/engine-utils':
+        specifier: workspace:*
+        version: link:../../utils/engine-utils
+    devDependencies:
+      heybox-mod-api:
+        specifier: 1.7.0
+        version: 1.7.0
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
+
+  extensions/ResidentEvil8Village:
+    dependencies:
+      '@heybox-mod-extensions/engine-utils':
+        specifier: workspace:*
+        version: link:../../utils/engine-utils
+    devDependencies:
+      heybox-mod-api:
+        specifier: 1.7.0
+        version: 1.7.0
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
+
+  extensions/ResidentEvil9Requiem:
+    dependencies:
+      '@heybox-mod-extensions/engine-utils':
+        specifier: workspace:*
+        version: link:../../utils/engine-utils
+    devDependencies:
+      heybox-mod-api:
+        specifier: 1.7.0
+        version: 1.7.0
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
+
   extensions/RimWorld:
     devDependencies:
       heybox-mod-api:
@@ -59,6 +159,15 @@ importers:
       heybox-mod-api:
         specifier: 1.6.0-alpha1
         version: 1.6.0-alpha1
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
+
+  utils/engine-utils:
+    devDependencies:
+      heybox-mod-api:
+        specifier: 1.7.0
+        version: 1.7.0
       typescript:
         specifier: ^5.7.0
         version: 5.9.3
@@ -229,6 +338,9 @@ packages:
   heybox-mod-api@1.6.0-alpha1:
     resolution: {integrity: sha512-za1fIKxTwC/6VCDsHuu4nL34Z6LPjODJ4t495UExwphsgKMtU/IY7m9OO73wx4bl3iVPcFhUkMFamkza2Fn2Cg==}
 
+  heybox-mod-api@1.7.0:
+    resolution: {integrity: sha512-Dh2nWsN/+IzSV4DOkAyDDwjdvO0MFRKhXBWI01x41/mx4vOpsy4frjCGtehhRKPLKPU2tiJaisNpXKkjPI4pZw==}
+
   heybox-mod-api@1.7.0-alpha1:
     resolution: {integrity: sha512-Hqe3hglwAf1MDaL122qUdHUiQBPauWH/jicDuHDBPezhWx4jptIij3LxAXngNxHLhX2X511eZS78o/cIed3mpg==}
 
@@ -347,6 +459,8 @@ snapshots:
       '@esbuild/win32-x64': 0.25.12
 
   heybox-mod-api@1.6.0-alpha1: {}
+
+  heybox-mod-api@1.7.0: {}
 
   heybox-mod-api@1.7.0-alpha1: {}
 

@@ -1,0 +1,21 @@
+{
+  "name": "@heybox-mod-extensions/engine-utils",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./re-engine": {
+      "types": "./dist/re-engine/index.d.ts",
+      "default": "./dist/re-engine/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "lint": "tsc --noEmit -p tsconfig.json",
+    "test": "pnpm run build && node --test test/*.test.mjs"
+  },
+  "devDependencies": {
+    "heybox-mod-api": "1.7.0",
+    "typescript": "^5.7.0"
+  }
+}
