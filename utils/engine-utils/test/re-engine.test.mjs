@@ -7,6 +7,7 @@ import {
   installReEnginePak,
   installReEngineReframeworkLoader,
   normalizeArchivePath,
+  normalizeReEnginePakFiles,
   testReEngineAutorun,
   testReEngineNatives,
   testReEnginePak,
@@ -86,7 +87,174 @@ test('assigns pak files after the current max game-root patch number', async () 
       instructions: [
         { type: 'copy', source: 'foo.pak', destination: 're_chunk_000.pak.patch_004.pak' },
         { type: 'copy', source: 'nested/bar.pak', destination: 're_chunk_000.pak.patch_005.pak' },
+        {
+          type: 'attribute',
+          key: 'reEnginePakDeployments',
+          value: [
+            {
+              engineFamily: 're-engine',
+              normalizeGroup: 're_chunk_000.pak',
+              originalArchivePath: 'foo.pak',
+              deployedFilename: 're_chunk_000.pak.patch_004.pak',
+              patchNumber: 4,
+            },
+            {
+              engineFamily: 're-engine',
+              normalizeGroup: 're_chunk_000.pak',
+              originalArchivePath: 'nested/bar.pak',
+              deployedFilename: 're_chunk_000.pak.patch_005.pak',
+              patchNumber: 5,
+            },
+          ],
+        },
       ],
     },
   )
+})
+
+test('normalizes managed RE Engine pak deployments with temporary moves and metadata updates', () => {
+  const operations = []
+  const warnings = []
+  const mutation = {
+    gamePath: '/game',
+    entries: [
+      {
+        modKey: '1_1',
+        modType: 're-pak',
+        targetPath: '/game/re_chunk_000.pak.patch_003.pak',
+        absolutePath: '/game/re_chunk_000.pak.patch_003.pak',
+        expectedHash: 'hash-a',
+        metaInfo: {
+          reEnginePakDeployments: [{
+            engineFamily: 're-engine',
+            normalizeGroup: 're_chunk_000.pak',
+            originalArchivePath: 'a.pak',
+            deployedFilename: 're_chunk_000.pak.patch_003.pak',
+            patchNumber: 3,
+          }],
+        },
+      },
+      {
+        modKey: '2_1',
+        modType: 're-pak',
+        targetPath: '/game/re_chunk_000.pak.patch_004.pak',
+        absolutePath: '/game/re_chunk_000.pak.patch_004.pak',
+        expectedHash: 'hash-b',
+        metaInfo: {
+          reEnginePakDeployments: [{
+            engineFamily: 're-engine',
+            normalizeGroup: 're_chunk_000.pak',
+            originalArchivePath: 'b.pak',
+            deployedFilename: 're_chunk_000.pak.patch_004.pak',
+            patchNumber: 4,
+          }],
+        },
+      },
+    ],
+    gameFiles: [],
+    moveDeployment: (input) => operations.push({ type: 'moveDeployment', ...input }),
+    setModMetadata: (input) => operations.push({ type: 'setModMetadata', ...input }),
+    warn: (message, details) => warnings.push({ message, details }),
+  }
+
+  normalizeReEnginePakFiles(pathApi, mutation, { modType: 're-pak' })
+
+  assert.equal(warnings.length, 0)
+  assert.equal(operations.length, 6)
+  assert.equal(operations[0].from, '/game/re_chunk_000.pak.patch_003.pak')
+  assert.match(operations[0].to, /\/game\/\.heybox-normalize-.+\.pak$/)
+  assert.equal(operations[1].to, '/game/re_chunk_000.pak.patch_001.pak')
+  assert.deepEqual(operations[2], {
+    type: 'setModMetadata',
+    modKey: '1_1',
+    patch: {
+      reEnginePakDeployments: [{
+        engineFamily: 're-engine',
+        normalizeGroup: 're_chunk_000.pak',
+        originalArchivePath: 'a.pak',
+        deployedFilename: 're_chunk_000.pak.patch_001.pak',
+        patchNumber: 1,
+      }],
+    },
+  })
+})
+
+test('skips RE Engine pak normalize when a target is occupied by an unmanaged pak', () => {
+  const operations = []
+  const warnings = []
+  const mutation = {
+    gamePath: '/game',
+    entries: [{
+      modKey: '1_1',
+      modType: 're-pak',
+      targetPath: '/game/re_chunk_000.pak.patch_003.pak',
+      absolutePath: '/game/re_chunk_000.pak.patch_003.pak',
+      expectedHash: 'hash-a',
+      metaInfo: {
+        reEnginePakDeployments: [{
+          engineFamily: 're-engine',
+          normalizeGroup: 're_chunk_000.pak',
+          originalArchivePath: 'a.pak',
+          deployedFilename: 're_chunk_000.pak.patch_003.pak',
+          patchNumber: 3,
+        }],
+      },
+    }, {
+      modKey: '2_1',
+      modType: 're-pak',
+      targetPath: '/game/re_chunk_000.pak.patch_004.pak',
+      absolutePath: '/game/re_chunk_000.pak.patch_004.pak',
+      expectedHash: 'hash-b',
+      metaInfo: {
+        reEnginePakDeployments: [{
+          engineFamily: 're-engine',
+          normalizeGroup: 're_chunk_000.pak',
+          originalArchivePath: 'b.pak',
+          deployedFilename: 're_chunk_000.pak.patch_004.pak',
+          patchNumber: 4,
+        }],
+      },
+    }],
+    gameFiles: [{ targetPath: '/game/re_chunk_000.pak.patch_001.pak', absolutePath: '/game/re_chunk_000.pak.patch_001.pak', managed: false }],
+    moveDeployment: (input) => operations.push(input),
+    setModMetadata: (input) => operations.push(input),
+    warn: (message, details) => warnings.push({ message, details }),
+  }
+
+  normalizeReEnginePakFiles(pathApi, mutation, { modType: 're-pak' })
+
+  assert.equal(operations.length, 0)
+  assert.equal(warnings.length, 1)
+})
+
+test('normalizes a single remaining managed RE Engine pak back to patch 001', () => {
+  const operations = []
+  const mutation = {
+    gamePath: '/game',
+    entries: [{
+      modKey: '2_1',
+      modType: 're-pak',
+      targetPath: '/game/re_chunk_000.pak.patch_002.pak',
+      absolutePath: '/game/re_chunk_000.pak.patch_002.pak',
+      expectedHash: 'hash-b',
+      metaInfo: {
+        reEnginePakDeployments: [{
+          engineFamily: 're-engine',
+          normalizeGroup: 're_chunk_000.pak',
+          originalArchivePath: 'b.pak',
+          deployedFilename: 're_chunk_000.pak.patch_002.pak',
+          patchNumber: 2,
+        }],
+      },
+    }],
+    gameFiles: [],
+    moveDeployment: (input) => operations.push({ type: 'moveDeployment', ...input }),
+    setModMetadata: (input) => operations.push({ type: 'setModMetadata', ...input }),
+  }
+
+  normalizeReEnginePakFiles(pathApi, mutation, { modType: 're-pak' })
+
+  assert.equal(operations.length, 3)
+  assert.equal(operations[1].to, '/game/re_chunk_000.pak.patch_001.pak')
+  assert.equal(operations[2].patch.reEnginePakDeployments[0].patchNumber, 1)
 })

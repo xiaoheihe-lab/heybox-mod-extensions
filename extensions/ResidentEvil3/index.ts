@@ -6,6 +6,7 @@ import {
   installReEnginePlugins,
   installReEngineReframework,
   installReEngineReframeworkLoader,
+  registerReEnginePakNormalizeHook,
   testReEngineAutorun,
   testReEngineNatives,
   testReEnginePak,
@@ -134,6 +135,7 @@ function registerPak(context: IExtensionContext): void {
       return { ...await installReEnginePak(context.api.util.path, context.api.util.fs, files, gameRoot), modType: MOD_TYPE_PAK }
     }
   )
+  registerReEnginePakNormalizeHook(context, MOD_TYPE_PAK)
 }
 
 async function main(context: IExtensionContext): Promise<boolean> {

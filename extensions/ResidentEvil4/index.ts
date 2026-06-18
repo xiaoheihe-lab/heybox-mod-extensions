@@ -6,6 +6,7 @@ import {
   installReEnginePlugins,
   installReEngineReframework,
   installReEngineReframeworkLoader,
+  registerReEnginePakNormalizeHook,
   testReEngineAutorun,
   testReEngineNatives,
   testReEnginePak,
@@ -203,6 +204,7 @@ function registerPak(context: IExtensionContext): void {
       }
     }
   )
+  registerReEnginePakNormalizeHook(context, MOD_TYPE_PAK)
 }
 
 async function main(context: IExtensionContext): Promise<boolean> {

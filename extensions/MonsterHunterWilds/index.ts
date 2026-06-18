@@ -8,6 +8,7 @@ import {
   installReEnginePlugins,
   installReEngineReframework,
   installReEngineReframeworkLoader,
+  registerReEnginePakNormalizeHook,
   normalizeArchivePath,
   testReEngineAutorun,
   testReEngineNatives,
@@ -207,6 +208,7 @@ function registerPak(context: IExtensionContext): void {
       }
     }
   )
+  registerReEnginePakNormalizeHook(context, MOD_TYPE_PAK)
 }
 
 function isReframeworkD2dFile(filePath: string): boolean {
