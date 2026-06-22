@@ -106,9 +106,11 @@ export declare function installReEngineAutorun(pathApi: PathApi, files: string[]
 export declare function installReEnginePlugins(pathApi: PathApi, files: string[]): InstallerResult;
 export declare function installReEngineNatives(pathApi: PathApi, files: string[]): InstallerResult;
 export declare function installReEnginePak(pathApi: PathApi, fsApi: FsApi, files: string[], gameRoot: string): Promise<InstallerResult>;
-export declare function normalizeReEnginePakFiles(pathApi: PathApi, mutation: ManagedDeploymentMutation, options?: {
+type ReEnginePakNormalizeOptions = {
     modType?: string;
     normalizeGroup?: string;
-}): void;
+};
+export declare function hasMissingReEnginePakDeployments(mutation: ManagedDeploymentMutation, options?: ReEnginePakNormalizeOptions): boolean;
+export declare function normalizeReEnginePakFiles(pathApi: PathApi, mutation: ManagedDeploymentMutation, options?: ReEnginePakNormalizeOptions): void;
 export declare function registerReEnginePakNormalizeHook(context: ManagedDeploymentHookRegistrar, modType: string): void;
 export {};

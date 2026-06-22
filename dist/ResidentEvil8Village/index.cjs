@@ -17,14 +17,14 @@ var __copyProps = (to, from, except, desc) => {
 };
 var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
 
-// index.ts
+// extensions/ResidentEvil8Village/index.ts
 var index_exports = {};
 __export(index_exports, {
   default: () => index_default
 });
 module.exports = __toCommonJS(index_exports);
 
-// ../../utils/engine-utils/dist/re-engine/index.js
+// utils/engine-utils/dist/re-engine/index.js
 function isUnsafeSegment(segment) {
   return segment === "." || segment === ".." || segment.includes("\0");
 }
@@ -193,12 +193,13 @@ function installReEngineNatives(pathApi, files) {
   return { instructions: buildMarkerFolderInstructions(pathApi, files, "natives", ["natives"]) };
 }
 
-// index.ts
+// extensions/ResidentEvil8Village/index.ts
 var GAME_ID = 1196590;
 var GAME_NAME = "Resident Evil Village";
 var EXECUTABLE = "re8.exe";
 var REFRAMEWORK_DLL = "dinput8.dll";
 var REFRAMEWORK_MOD_ID = 1521;
+var FIRST_NATIVES_MOD_ID = 2103;
 var MOD_TYPE_PRIORITY = 25;
 var MOD_TYPE_REFRAMEWORK_LOADER = `${GAME_ID}-reframework-loader`;
 var MOD_TYPE_REFRAMEWORK = `${GAME_ID}-reframework`;
@@ -224,6 +225,14 @@ function getReframeworkRequirements() {
       name: "REFramework",
       modId: REFRAMEWORK_MOD_ID,
       mod_id: REFRAMEWORK_MOD_ID,
+      openModDetailDialog: false,
+      requirement: "enabled"
+    },
+    {
+      key: "resident-evil-8-village-first-natives",
+      name: "FirstNatives",
+      modId: FIRST_NATIVES_MOD_ID,
+      mod_id: FIRST_NATIVES_MOD_ID,
       openModDetailDialog: false,
       requirement: "enabled"
     }

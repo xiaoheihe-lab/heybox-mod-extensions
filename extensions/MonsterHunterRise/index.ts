@@ -1,11 +1,13 @@
 import type { IExtensionContext } from 'heybox-mod-api'
 import {
+  archiveExtName,
   installReEngineAutorun,
   installReEngineNatives,
   installReEnginePak,
   installReEnginePlugins,
   installReEngineReframework,
   installReEngineReframeworkLoader,
+  normalizeArchivePath,
   registerReEnginePakNormalizeHook,
   testReEngineAutorun,
   testReEngineNatives,
@@ -27,6 +29,27 @@ const MOD_TYPE_AUTORUN = `${GAME_ID}-autorun`
 const MOD_TYPE_PLUGINS = `${GAME_ID}-plugins`
 const MOD_TYPE_NATIVES = `${GAME_ID}-natives`
 const MOD_TYPE_PAK = `${GAME_ID}-pak`
+const ROOT_METADATA_IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp', '.tif', '.tiff'])
+
+function getRootArchiveFileName(filePath: string): string {
+  const normalized = normalizeArchivePath(filePath)
+  if (!normalized || normalized.includes('/')) return ''
+  return normalized.toLowerCase()
+}
+
+function isRootMetadataImage(filePath: string): boolean {
+  return !!getRootArchiveFileName(filePath) && ROOT_METADATA_IMAGE_EXTENSIONS.has(archiveExtName(filePath))
+}
+
+function filterMonsterHunterArchiveFiles(files: string[]): string[] {
+  const hasRootModInfo = files.some((file) => getRootArchiveFileName(file) === 'modinfo.ini')
+  if (!hasRootModInfo) return files
+
+  return files.filter((file) => {
+    const rootFileName = getRootArchiveFileName(file)
+    return rootFileName !== 'modinfo.ini' && !isRootMetadataImage(file)
+  })
+}
 
 async function findGame(context: IExtensionContext): Promise<string | undefined> {
   const game = await context.api.util.GameStoreHelper.findByAppId(GAME_ID)
@@ -79,8 +102,8 @@ function registerReframeworkLoader(context: IExtensionContext): void {
   context.registerInstaller(
     MOD_TYPE_REFRAMEWORK_LOADER,
     10,
-    (files, gameId) => testReEngineReframeworkLoader(files, gameId, GAME_ID),
-    (files) => ({ ...installReEngineReframeworkLoader(context.api.util.path, files), modType: MOD_TYPE_REFRAMEWORK_LOADER })
+    (files, gameId) => testReEngineReframeworkLoader(filterMonsterHunterArchiveFiles(files), gameId, GAME_ID),
+    (files) => ({ ...installReEngineReframeworkLoader(context.api.util.path, filterMonsterHunterArchiveFiles(files)), modType: MOD_TYPE_REFRAMEWORK_LOADER })
   )
 }
 
@@ -89,8 +112,8 @@ function registerReframework(context: IExtensionContext): void {
   context.registerInstaller(
     MOD_TYPE_REFRAMEWORK,
     11,
-    (files, gameId) => testReEngineReframework(files, gameId, GAME_ID),
-    (files) => ({ ...installReEngineReframework(context.api.util.path, files), modType: MOD_TYPE_REFRAMEWORK })
+    (files, gameId) => testReEngineReframework(filterMonsterHunterArchiveFiles(files), gameId, GAME_ID),
+    (files) => ({ ...installReEngineReframework(context.api.util.path, filterMonsterHunterArchiveFiles(files)), modType: MOD_TYPE_REFRAMEWORK })
   )
 }
 
@@ -99,8 +122,8 @@ function registerAutorun(context: IExtensionContext): void {
   context.registerInstaller(
     MOD_TYPE_AUTORUN,
     12,
-    (files, gameId) => testReEngineAutorun(files, gameId, GAME_ID),
-    (files) => ({ ...installReEngineAutorun(context.api.util.path, files), modType: MOD_TYPE_AUTORUN })
+    (files, gameId) => testReEngineAutorun(filterMonsterHunterArchiveFiles(files), gameId, GAME_ID),
+    (files) => ({ ...installReEngineAutorun(context.api.util.path, filterMonsterHunterArchiveFiles(files)), modType: MOD_TYPE_AUTORUN })
   )
 }
 
@@ -109,8 +132,8 @@ function registerPlugins(context: IExtensionContext): void {
   context.registerInstaller(
     MOD_TYPE_PLUGINS,
     13,
-    (files, gameId) => testReEnginePlugins(files, gameId, GAME_ID),
-    (files) => ({ ...installReEnginePlugins(context.api.util.path, files), modType: MOD_TYPE_PLUGINS })
+    (files, gameId) => testReEnginePlugins(filterMonsterHunterArchiveFiles(files), gameId, GAME_ID),
+    (files) => ({ ...installReEnginePlugins(context.api.util.path, filterMonsterHunterArchiveFiles(files)), modType: MOD_TYPE_PLUGINS })
   )
 }
 
@@ -119,8 +142,8 @@ function registerNatives(context: IExtensionContext): void {
   context.registerInstaller(
     MOD_TYPE_NATIVES,
     14,
-    (files, gameId) => testReEngineNatives(files, gameId, GAME_ID),
-    (files) => ({ ...installReEngineNatives(context.api.util.path, files), modType: MOD_TYPE_NATIVES })
+    (files, gameId) => testReEngineNatives(filterMonsterHunterArchiveFiles(files), gameId, GAME_ID),
+    (files) => ({ ...installReEngineNatives(context.api.util.path, filterMonsterHunterArchiveFiles(files)), modType: MOD_TYPE_NATIVES })
   )
 }
 
@@ -129,10 +152,10 @@ function registerPak(context: IExtensionContext): void {
   context.registerInstaller(
     MOD_TYPE_PAK,
     15,
-    (files, gameId) => testReEnginePak(files, gameId, GAME_ID),
+    (files, gameId) => testReEnginePak(filterMonsterHunterArchiveFiles(files), gameId, GAME_ID),
     async (files) => {
       const gameRoot = await getGameRoot(context)
-      return { ...await installReEnginePak(context.api.util.path, context.api.util.fs, files, gameRoot), modType: MOD_TYPE_PAK }
+      return { ...await installReEnginePak(context.api.util.path, context.api.util.fs, filterMonsterHunterArchiveFiles(files), gameRoot), modType: MOD_TYPE_PAK }
     }
   )
   registerReEnginePakNormalizeHook(context, MOD_TYPE_PAK)

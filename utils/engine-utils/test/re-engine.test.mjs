@@ -3,6 +3,7 @@ import { test } from 'node:test'
 import {
   createReEnginePakName,
   extractPatchNumber,
+  hasMissingReEnginePakDeployments,
   installReEngineNatives,
   installReEnginePak,
   installReEngineReframeworkLoader,
@@ -112,7 +113,7 @@ test('assigns pak files after the current max game-root patch number', async () 
   )
 })
 
-test('normalizes managed RE Engine pak deployments with temporary moves and metadata updates', () => {
+test('normalizes managed RE Engine pak deployments with direct moves and metadata updates', () => {
   const operations = []
   const warnings = []
   const mutation = {
@@ -160,11 +161,10 @@ test('normalizes managed RE Engine pak deployments with temporary moves and meta
   normalizeReEnginePakFiles(pathApi, mutation, { modType: 're-pak' })
 
   assert.equal(warnings.length, 0)
-  assert.equal(operations.length, 6)
+  assert.equal(operations.length, 4)
   assert.equal(operations[0].from, '/game/re_chunk_000.pak.patch_003.pak')
-  assert.match(operations[0].to, /\/game\/\.heybox-normalize-.+\.pak$/)
-  assert.equal(operations[1].to, '/game/re_chunk_000.pak.patch_001.pak')
-  assert.deepEqual(operations[2], {
+  assert.equal(operations[0].to, '/game/re_chunk_000.pak.patch_001.pak')
+  assert.deepEqual(operations[1], {
     type: 'setModMetadata',
     modKey: '1_1',
     patch: {
@@ -179,7 +179,7 @@ test('normalizes managed RE Engine pak deployments with temporary moves and meta
   })
 })
 
-test('skips RE Engine pak normalize when a target is occupied by an unmanaged pak', () => {
+test('skips unmanaged occupied pak slots when assigning normalize targets', () => {
   const operations = []
   const warnings = []
   const mutation = {
@@ -223,8 +223,12 @@ test('skips RE Engine pak normalize when a target is occupied by an unmanaged pa
 
   normalizeReEnginePakFiles(pathApi, mutation, { modType: 're-pak' })
 
-  assert.equal(operations.length, 0)
-  assert.equal(warnings.length, 1)
+  assert.equal(warnings.length, 0)
+  assert.equal(operations.length, 4)
+  assert.equal(operations[0].from, '/game/re_chunk_000.pak.patch_003.pak')
+  assert.equal(operations[0].to, '/game/re_chunk_000.pak.patch_002.pak')
+  assert.equal(operations[2].from, '/game/re_chunk_000.pak.patch_004.pak')
+  assert.equal(operations[2].to, '/game/re_chunk_000.pak.patch_003.pak')
 })
 
 test('normalizes a single remaining managed RE Engine pak back to patch 001', () => {
@@ -254,7 +258,89 @@ test('normalizes a single remaining managed RE Engine pak back to patch 001', ()
 
   normalizeReEnginePakFiles(pathApi, mutation, { modType: 're-pak' })
 
-  assert.equal(operations.length, 3)
-  assert.equal(operations[1].to, '/game/re_chunk_000.pak.patch_001.pak')
-  assert.equal(operations[2].patch.reEnginePakDeployments[0].patchNumber, 1)
+  assert.equal(operations.length, 2)
+  assert.equal(operations[0].to, '/game/re_chunk_000.pak.patch_001.pak')
+  assert.equal(operations[1].patch.reEnginePakDeployments[0].patchNumber, 1)
+})
+
+test('normalizes Windows absolute managed pak paths after unmanaged occupied slots', () => {
+  const operations = []
+  const mutation = {
+    gamePath: 'E:\\SteamLibrary\\steamapps\\common\\MonsterHunterWilds',
+    entries: [{
+      modKey: '1336_1612',
+      modType: '2246340-pak',
+      targetPath: 'E:\\SteamLibrary\\steamapps\\common\\MonsterHunterWilds\\re_chunk_000.pak.patch_017.pak',
+      absolutePath: 'E:\\SteamLibrary\\steamapps\\common\\MonsterHunterWilds\\re_chunk_000.pak.patch_017.pak',
+      expectedHash: 'hash-17',
+      exists: true,
+      metaInfo: {
+        reEnginePakDeployments: [{
+          engineFamily: 're-engine',
+          normalizeGroup: 're_chunk_000.pak',
+          originalArchivePath: 'mod.pak',
+          deployedFilename: 're_chunk_000.pak.patch_017.pak',
+          patchNumber: 17,
+        }],
+      },
+    }],
+    gameFiles: Array.from({ length: 15 }, (_, index) => {
+      const patch = String(index + 1).padStart(3, '0')
+      return {
+        targetPath: `E:\\SteamLibrary\\steamapps\\common\\MonsterHunterWilds\\re_chunk_000.pak.patch_${patch}.pak`,
+        absolutePath: `E:\\SteamLibrary\\steamapps\\common\\MonsterHunterWilds\\re_chunk_000.pak.patch_${patch}.pak`,
+        managed: false,
+      }
+    }),
+    moveDeployment: (input) => operations.push({ type: 'moveDeployment', ...input }),
+    setModMetadata: (input) => operations.push({ type: 'setModMetadata', ...input }),
+  }
+
+  const windowsPathApi = {
+    join: (...segments) => segments.filter(Boolean).join('\\'),
+  }
+
+  normalizeReEnginePakFiles(windowsPathApi, mutation, { modType: '2246340-pak' })
+
+  assert.equal(operations.length, 2)
+  assert.equal(
+    operations[0].from,
+    'E:\\SteamLibrary\\steamapps\\common\\MonsterHunterWilds\\re_chunk_000.pak.patch_017.pak'
+  )
+  assert.equal(
+    operations[0].to,
+    'E:\\SteamLibrary\\steamapps\\common\\MonsterHunterWilds\\re_chunk_000.pak.patch_016.pak'
+  )
+  assert.equal(operations[1].patch.reEnginePakDeployments[0].deployedFilename, 're_chunk_000.pak.patch_016.pak')
+  assert.equal(operations[1].patch.reEnginePakDeployments[0].patchNumber, 16)
+})
+
+test('detects missing managed pak deployments before requesting hashed adopt pass', () => {
+  const mutation = {
+    gamePath: '/game',
+    entries: [{
+      modKey: '1_1',
+      modType: 're-pak',
+      targetPath: '/game/re_chunk_000.pak.patch_003.pak',
+      absolutePath: '/game/re_chunk_000.pak.patch_003.pak',
+      expectedHash: 'hash-a',
+      exists: false,
+      metaInfo: {
+        reEnginePakDeployments: [{
+          engineFamily: 're-engine',
+          normalizeGroup: 're_chunk_000.pak',
+          originalArchivePath: 'a.pak',
+          deployedFilename: 're_chunk_000.pak.patch_003.pak',
+          patchNumber: 3,
+        }],
+      },
+    }],
+    gameFiles: [{ targetPath: '/game/re_chunk_000.pak.patch_001.pak', absolutePath: '/game/re_chunk_000.pak.patch_001.pak', managed: false }],
+    moveDeployment() {},
+    setModMetadata() {},
+  }
+
+  assert.equal(hasMissingReEnginePakDeployments(mutation, { modType: 're-pak' }), true)
+  mutation.entries[0].exists = true
+  assert.equal(hasMissingReEnginePakDeployments(mutation, { modType: 're-pak' }), false)
 })

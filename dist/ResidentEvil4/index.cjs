@@ -17,14 +17,14 @@ var __copyProps = (to, from, except, desc) => {
 };
 var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
 
-// index.ts
+// extensions/ResidentEvil4/index.ts
 var index_exports = {};
 __export(index_exports, {
   default: () => index_default
 });
 module.exports = __toCommonJS(index_exports);
 
-// ../../utils/engine-utils/dist/re-engine/index.js
+// utils/engine-utils/dist/re-engine/index.js
 function isUnsafeSegment(segment) {
   return segment === "." || segment === ".." || segment.includes("\0");
 }
@@ -302,41 +302,68 @@ async function installReEnginePak(pathApi, fsApi, files, gameRoot) {
 function normalizeFsComparablePath(input) {
   return String(input || "").replace(/\\/g, "/").toLowerCase();
 }
+function fsPathBaseName(filePath) {
+  const normalized = String(filePath || "").replace(/\\/g, "/").replace(/\/+$/g, "");
+  if (!normalized || normalized.includes("\0"))
+    return "";
+  const parts = normalized.split("/");
+  return parts[parts.length - 1] || "";
+}
+function fsPathExtName(filePath) {
+  const base = fsPathBaseName(filePath);
+  const dot = base.lastIndexOf(".");
+  return dot >= 0 ? base.slice(dot).toLowerCase() : "";
+}
 function isManagedGameFile(targetPath, entries) {
   const normalized = normalizeFsComparablePath(targetPath);
   return entries.some((entry) => normalizeFsComparablePath(entry.targetPath) === normalized);
 }
-function findUnmanagedCollision(filename, mutation, selectedEntries) {
-  const expected = filename.toLowerCase();
+function getUnmanagedOccupiedFilenames(mutation, selectedEntries) {
+  const occupied = /* @__PURE__ */ new Set();
   for (const file of mutation.gameFiles || []) {
-    if (archiveBaseName(file.targetPath).toLowerCase() !== expected)
+    if (fsPathExtName(file.targetPath) !== ".pak")
       continue;
     if (file.managed || isManagedGameFile(file.targetPath, selectedEntries))
       continue;
-    return file;
+    const name = fsPathBaseName(file.targetPath).toLowerCase();
+    if (name)
+      occupied.add(name);
   }
-  return null;
+  return occupied;
+}
+function hasMatchingReEnginePakMetadata(entry, normalizeGroup) {
+  if (fsPathExtName(entry.targetPath) !== ".pak")
+    return false;
+  const currentName = fsPathBaseName(entry.targetPath);
+  return getReEnginePakDeployments(entry.metaInfo).some((item) => item.normalizeGroup === normalizeGroup && item.deployedFilename.toLowerCase() === currentName.toLowerCase());
+}
+function hasMissingReEnginePakDeployments(mutation, options = {}) {
+  const normalizeGroup = options.normalizeGroup || "re_chunk_000.pak";
+  return mutation.entries.some((entry) => (!options.modType || entry.modType === options.modType) && entry.exists === false && hasMatchingReEnginePakMetadata(entry, normalizeGroup));
 }
 function normalizeReEnginePakFiles(pathApi, mutation, options = {}) {
   const normalizeGroup = options.normalizeGroup || "re_chunk_000.pak";
   const records = [];
+  const logPrefix = "[REEnginePakNormalize]";
   for (const entry of mutation.entries) {
     if (options.modType && entry.modType !== options.modType)
       continue;
-    if (archiveExtName(entry.targetPath) !== ".pak")
+    if (fsPathExtName(entry.targetPath) !== ".pak")
       continue;
     const deployments = getReEnginePakDeployments(entry.metaInfo);
     let currentTargetPath = entry.targetPath;
-    let currentName = archiveBaseName(currentTargetPath);
+    let currentName = fsPathBaseName(currentTargetPath);
     const originalName = currentName;
     const deployment = deployments.find((item) => item.normalizeGroup === normalizeGroup && item.deployedFilename.toLowerCase() === currentName.toLowerCase()) || deployments.find((item) => item.normalizeGroup === normalizeGroup && item.deployedFilename.toLowerCase() === originalName.toLowerCase());
-    if (!deployment)
+    if (!deployment) {
       continue;
+    }
     if (entry.exists === false && mutation.adoptDeployment) {
-      const candidates = (mutation.gameFiles || []).filter((file) => archiveExtName(file.targetPath) === ".pak" && file.hash === entry.expectedHash && !file.managed);
+      const candidates = (mutation.gameFiles || []).filter((file) => fsPathExtName(file.targetPath) === ".pak" && file.hash === entry.expectedHash && !file.managed);
       if (candidates.length === 1) {
         currentTargetPath = candidates[0].targetPath;
-        currentName = archiveBaseName(currentTargetPath);
+        currentName = fsPathBaseName(currentTargetPath);
+        console.log(`${logPrefix} adopt ${entry.modKey}: ${entry.targetPath} -> ${currentTargetPath}`);
         mutation.adoptDeployment({
           modKey: entry.modKey,
           from: entry.targetPath,
@@ -344,6 +371,7 @@ function normalizeReEnginePakFiles(pathApi, mutation, options = {}) {
           expectedHash: entry.expectedHash
         });
       } else {
+        console.warn(`${logPrefix} skip missing ${entry.modKey}: ${entry.targetPath} candidates=${candidates.length}`);
         mutation.warn?.("RE Engine pak normalize skipped a missing managed pak because no unique same-hash candidate was found.", {
           target: entry.targetPath,
           candidates: candidates.length
@@ -362,42 +390,35 @@ function normalizeReEnginePakFiles(pathApi, mutation, options = {}) {
       finalPatchNumber: patchNumber
     });
   }
-  if (records.length === 0)
+  if (records.length === 0) {
     return;
+  }
   records.sort((a, b) => a.patchNumber - b.patchNumber || String(a.entry.modKey).localeCompare(String(b.entry.modKey)) || a.targetFilename.localeCompare(b.targetFilename));
   const selectedEntries = records.map((record) => record.entry);
+  const occupiedUnmanagedFilenames = getUnmanagedOccupiedFilenames(mutation, selectedEntries);
+  let nextPatchNumber = 1;
   for (let index = 0; index < records.length; index += 1) {
-    const patchNumber = index + 1;
-    const finalFilename = createReEnginePakName(patchNumber);
-    const collision = findUnmanagedCollision(finalFilename, mutation, selectedEntries);
-    if (collision) {
-      mutation.warn?.("RE Engine pak normalize skipped because target patch is occupied by an unmanaged file.", {
-        target: finalFilename,
-        path: collision.targetPath
-      });
-      return;
+    let patchNumber = nextPatchNumber;
+    let finalFilename = createReEnginePakName(patchNumber);
+    while (occupiedUnmanagedFilenames.has(finalFilename.toLowerCase())) {
+      patchNumber += 1;
+      finalFilename = createReEnginePakName(patchNumber);
     }
     records[index].finalFilename = finalFilename;
     records[index].finalPatchNumber = patchNumber;
+    nextPatchNumber = patchNumber + 1;
   }
   const moving = records.filter((record) => record.targetFilename !== record.finalFilename);
-  if (moving.length === 0)
+  if (moving.length === 0) {
     return;
-  const nonce = Date.now().toString(36);
+  }
   for (let index = 0; index < moving.length; index += 1) {
     const record = moving[index];
-    const tempFilename = `.heybox-normalize-${nonce}-${index + 1}.pak`;
-    const tempTarget = pathApi.join(mutation.gamePath, tempFilename);
     const finalTarget = pathApi.join(mutation.gamePath, record.finalFilename);
+    console.log(`${logPrefix} move ${record.entry.modKey}: ${record.entry.targetPath} -> ${finalTarget}`);
     mutation.moveDeployment({
       modKey: record.entry.modKey,
       from: record.entry.targetPath,
-      to: tempTarget,
-      expectedHash: record.entry.expectedHash
-    });
-    mutation.moveDeployment({
-      modKey: record.entry.modKey,
-      from: tempTarget,
       to: finalTarget,
       expectedHash: record.entry.expectedHash
     });
@@ -414,26 +435,39 @@ function registerReEnginePakNormalizeHook(context, modType) {
   if (typeof context.registerManagedDeploymentHook !== "function")
     return;
   const phases = ["afterEnable", "afterDisable", "afterUninstall"];
+  const buildMutationOptions = (includeGameFileHashes) => ({
+    modType,
+    includeManagedCurrentHashes: false,
+    includeGameFileHashes,
+    includeGameFiles: {
+      directories: ["{gamePath}"],
+      extensions: [".pak"]
+    }
+  });
   for (const phase of phases) {
     context.registerManagedDeploymentHook(phase, { modType }, async () => {
       const api = context.api;
       if (typeof api?.vfs?.runManagedDeploymentMutation !== "function")
         return;
-      await api.vfs.runManagedDeploymentMutation({
-        modType,
-        includeCurrentHashes: true,
-        includeGameFiles: {
-          directories: ["{gamePath}"],
-          extensions: [".pak"]
+      let needsHashedAdoptPass = false;
+      await api.vfs.runManagedDeploymentMutation(buildMutationOptions(false), (mutation) => {
+        if (hasMissingReEnginePakDeployments(mutation, { modType })) {
+          needsHashedAdoptPass = true;
+          console.log(`[REEnginePakNormalize] missing managed pak detected; retry with hashes phase=${phase} modType=${modType}`);
+          return;
         }
-      }, (mutation) => {
+        normalizeReEnginePakFiles(context.api.util.path, mutation, { modType });
+      });
+      if (!needsHashedAdoptPass)
+        return;
+      await api.vfs.runManagedDeploymentMutation(buildMutationOptions(true), (mutation) => {
         normalizeReEnginePakFiles(context.api.util.path, mutation, { modType });
       });
     });
   }
 }
 
-// index.ts
+// extensions/ResidentEvil4/index.ts
 var GAME_ID = 2050650;
 var GAME_NAME = "Resident Evil 4";
 var EXECUTABLE = "re4.exe";

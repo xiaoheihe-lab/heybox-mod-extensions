@@ -17,6 +17,7 @@ const GAME_NAME = 'Resident Evil Village'
 const EXECUTABLE = 're8.exe'
 const REFRAMEWORK_DLL = 'dinput8.dll'
 const REFRAMEWORK_MOD_ID = 1521
+const FIRST_NATIVES_MOD_ID = 2103
 const MOD_TYPE_PRIORITY = 25
 const MOD_TYPE_REFRAMEWORK_LOADER = `${GAME_ID}-reframework-loader`
 const MOD_TYPE_REFRAMEWORK = `${GAME_ID}-reframework`
@@ -45,6 +46,14 @@ function getReframeworkRequirements() {
       name: 'REFramework',
       modId: REFRAMEWORK_MOD_ID,
       mod_id: REFRAMEWORK_MOD_ID,
+      openModDetailDialog: false,
+      requirement: 'enabled',
+    },
+    {
+      key: 'resident-evil-8-village-first-natives',
+      name: 'FirstNatives',
+      modId: FIRST_NATIVES_MOD_ID,
+      mod_id: FIRST_NATIVES_MOD_ID,
       openModDetailDialog: false,
       requirement: 'enabled',
     },
