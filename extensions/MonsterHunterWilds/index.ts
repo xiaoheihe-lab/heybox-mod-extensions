@@ -5,11 +5,9 @@ import {
   type CopyInstruction,
   installReEngineAutorun,
   installReEngineNatives,
-  installReEnginePak,
   installReEnginePlugins,
   installReEngineReframework,
   installReEngineReframeworkLoader,
-  registerReEnginePakNormalizeHook,
   normalizeArchivePath,
   testReEngineAutorun,
   testReEngineNatives,
@@ -68,12 +66,21 @@ async function fileExists(context: IExtensionContext, filePath: string): Promise
   }
 }
 
-async function getGameRoot(context: IExtensionContext): Promise<string> {
-  const gamePath = await findGame(context)
-  if (!gamePath) {
-    throw new Error(`Monster Hunter Wilds game path is unavailable: appid=${GAME_ID}`)
+function installMonsterHunterPak(context: IExtensionContext, files: string[]) {
+  const instructions: CopyInstruction[] = []
+
+  for (const file of files) {
+    const source = normalizeArchivePath(file)
+    if (!source || archiveExtName(source) !== '.pak') continue
+
+    instructions.push({
+      type: 'copy',
+      source,
+      destination: context.api.util.path.join('pak_mods', archiveBaseName(source)),
+    })
   }
-  return gamePath
+
+  return { instructions, modType: MOD_TYPE_PAK }
 }
 
 function getReframeworkRequirements() {
@@ -222,15 +229,8 @@ function registerPak(context: IExtensionContext): void {
     MOD_TYPE_PAK,
     15,
     (files, gameId) => testReEnginePak(filterMonsterHunterArchiveFiles(files), gameId, GAME_ID),
-    async (files) => {
-      const gameRoot = await getGameRoot(context)
-      return {
-        ...await installReEnginePak(context.api.util.path, context.api.util.fs, filterMonsterHunterArchiveFiles(files), gameRoot),
-        modType: MOD_TYPE_PAK,
-      }
-    }
+    (files) => installMonsterHunterPak(context, filterMonsterHunterArchiveFiles(files))
   )
-  registerReEnginePakNormalizeHook(context, MOD_TYPE_PAK)
 }
 
 function isReframeworkD2dFile(filePath: string): boolean {

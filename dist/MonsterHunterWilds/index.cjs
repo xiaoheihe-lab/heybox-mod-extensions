@@ -17,14 +17,14 @@ var __copyProps = (to, from, except, desc) => {
 };
 var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
 
-// extensions/MonsterHunterWilds/index.ts
+// index.ts
 var index_exports = {};
 __export(index_exports, {
   default: () => index_default
 });
 module.exports = __toCommonJS(index_exports);
 
-// utils/engine-utils/dist/re-engine/index.js
+// ../../utils/engine-utils/dist/re-engine/index.js
 function isUnsafeSegment(segment) {
   return segment === "." || segment === ".." || segment.includes("\0");
 }
@@ -181,96 +181,6 @@ function buildReframeworkSiblingInstructions(pathApi, files) {
   }
   return instructions;
 }
-function extractPatchNumber(fileName) {
-  const match = /patch_(\d+)\.pak$/iu.exec(fileName);
-  return match ? Number(match[1]) || 0 : 0;
-}
-async function isFile(fsApi, filePath) {
-  try {
-    const stat = await fsApi.stat(filePath);
-    return !!stat.isFile;
-  } catch {
-    return false;
-  }
-}
-async function getNextReEnginePakIndex(pathApi, fsApi, gameRoot) {
-  let entries = [];
-  try {
-    entries = await fsApi.readdir(gameRoot);
-  } catch {
-    return 1;
-  }
-  let maxPatch = 0;
-  for (const entry of entries) {
-    const fullPath = pathApi.join(gameRoot, entry);
-    if (!await isFile(fsApi, fullPath))
-      continue;
-    if (!entry.toLowerCase().endsWith(".pak"))
-      continue;
-    maxPatch = Math.max(maxPatch, extractPatchNumber(entry));
-  }
-  return maxPatch + 1;
-}
-function createReEnginePakName(index) {
-  return `re_chunk_000.pak.patch_${String(index).padStart(3, "0")}.pak`;
-}
-function getReEnginePakDeployments(metaInfo) {
-  const raw = metaInfo?.reEnginePakDeployments;
-  if (!Array.isArray(raw))
-    return [];
-  return raw.map((item) => {
-    if (!item || typeof item !== "object")
-      return null;
-    const value = item;
-    const originalArchivePath = String(value.originalArchivePath || "");
-    const deployedFilename = String(value.deployedFilename || "");
-    const patchNumber = Number(value.patchNumber || extractPatchNumber(deployedFilename));
-    if (!originalArchivePath || !deployedFilename || !Number.isFinite(patchNumber) || patchNumber <= 0)
-      return null;
-    return {
-      engineFamily: "re-engine",
-      normalizeGroup: String(value.normalizeGroup || "re_chunk_000.pak"),
-      originalArchivePath,
-      deployedFilename,
-      patchNumber
-    };
-  }).filter(Boolean);
-}
-function updateReEnginePakDeployment(deployments, deploymentToUpdate, toFilename, patchNumber) {
-  return deployments.map((item) => {
-    if (item.normalizeGroup !== deploymentToUpdate.normalizeGroup || item.originalArchivePath !== deploymentToUpdate.originalArchivePath)
-      return item;
-    return {
-      ...item,
-      deployedFilename: toFilename,
-      patchNumber
-    };
-  });
-}
-async function buildPakInstructions(pathApi, fsApi, files, gameRoot) {
-  let nextIndex = await getNextReEnginePakIndex(pathApi, fsApi, gameRoot);
-  const instructions = [];
-  const deployments = [];
-  for (const entry of normalizeEntries(files)) {
-    if (archiveExtName(entry.source) !== ".pak")
-      continue;
-    const deployedFilename = createReEnginePakName(nextIndex);
-    instructions.push({
-      type: "copy",
-      source: entry.source,
-      destination: deployedFilename
-    });
-    deployments.push({
-      engineFamily: "re-engine",
-      normalizeGroup: "re_chunk_000.pak",
-      originalArchivePath: entry.source,
-      deployedFilename,
-      patchNumber: nextIndex
-    });
-    nextIndex += 1;
-  }
-  return { instructions, deployments };
-}
 function installReEngineReframeworkLoader(pathApi, files) {
   return { instructions: buildReframeworkSiblingInstructions(pathApi, files) };
 }
@@ -286,188 +196,8 @@ function installReEnginePlugins(pathApi, files) {
 function installReEngineNatives(pathApi, files) {
   return { instructions: buildMarkerFolderInstructions(pathApi, files, "natives", ["natives"]) };
 }
-async function installReEnginePak(pathApi, fsApi, files, gameRoot) {
-  const { instructions, deployments } = await buildPakInstructions(pathApi, fsApi, files, gameRoot);
-  return {
-    instructions: [
-      ...instructions,
-      {
-        type: "attribute",
-        key: "reEnginePakDeployments",
-        value: deployments
-      }
-    ]
-  };
-}
-function normalizeFsComparablePath(input) {
-  return String(input || "").replace(/\\/g, "/").toLowerCase();
-}
-function fsPathBaseName(filePath) {
-  const normalized = String(filePath || "").replace(/\\/g, "/").replace(/\/+$/g, "");
-  if (!normalized || normalized.includes("\0"))
-    return "";
-  const parts = normalized.split("/");
-  return parts[parts.length - 1] || "";
-}
-function fsPathExtName(filePath) {
-  const base = fsPathBaseName(filePath);
-  const dot = base.lastIndexOf(".");
-  return dot >= 0 ? base.slice(dot).toLowerCase() : "";
-}
-function isManagedGameFile(targetPath, entries) {
-  const normalized = normalizeFsComparablePath(targetPath);
-  return entries.some((entry) => normalizeFsComparablePath(entry.targetPath) === normalized);
-}
-function getUnmanagedOccupiedFilenames(mutation, selectedEntries) {
-  const occupied = /* @__PURE__ */ new Set();
-  for (const file of mutation.gameFiles || []) {
-    if (fsPathExtName(file.targetPath) !== ".pak")
-      continue;
-    if (file.managed || isManagedGameFile(file.targetPath, selectedEntries))
-      continue;
-    const name = fsPathBaseName(file.targetPath).toLowerCase();
-    if (name)
-      occupied.add(name);
-  }
-  return occupied;
-}
-function hasMatchingReEnginePakMetadata(entry, normalizeGroup) {
-  if (fsPathExtName(entry.targetPath) !== ".pak")
-    return false;
-  const currentName = fsPathBaseName(entry.targetPath);
-  return getReEnginePakDeployments(entry.metaInfo).some((item) => item.normalizeGroup === normalizeGroup && item.deployedFilename.toLowerCase() === currentName.toLowerCase());
-}
-function hasMissingReEnginePakDeployments(mutation, options = {}) {
-  const normalizeGroup = options.normalizeGroup || "re_chunk_000.pak";
-  return mutation.entries.some((entry) => (!options.modType || entry.modType === options.modType) && entry.exists === false && hasMatchingReEnginePakMetadata(entry, normalizeGroup));
-}
-function normalizeReEnginePakFiles(pathApi, mutation, options = {}) {
-  const normalizeGroup = options.normalizeGroup || "re_chunk_000.pak";
-  const records = [];
-  const logPrefix = "[REEnginePakNormalize]";
-  for (const entry of mutation.entries) {
-    if (options.modType && entry.modType !== options.modType)
-      continue;
-    if (fsPathExtName(entry.targetPath) !== ".pak")
-      continue;
-    const deployments = getReEnginePakDeployments(entry.metaInfo);
-    let currentTargetPath = entry.targetPath;
-    let currentName = fsPathBaseName(currentTargetPath);
-    const originalName = currentName;
-    const deployment = deployments.find((item) => item.normalizeGroup === normalizeGroup && item.deployedFilename.toLowerCase() === currentName.toLowerCase()) || deployments.find((item) => item.normalizeGroup === normalizeGroup && item.deployedFilename.toLowerCase() === originalName.toLowerCase());
-    if (!deployment) {
-      continue;
-    }
-    if (entry.exists === false && mutation.adoptDeployment) {
-      const candidates = (mutation.gameFiles || []).filter((file) => fsPathExtName(file.targetPath) === ".pak" && file.hash === entry.expectedHash && !file.managed);
-      if (candidates.length === 1) {
-        currentTargetPath = candidates[0].targetPath;
-        currentName = fsPathBaseName(currentTargetPath);
-        console.log(`${logPrefix} adopt ${entry.modKey}: ${entry.targetPath} -> ${currentTargetPath}`);
-        mutation.adoptDeployment({
-          modKey: entry.modKey,
-          from: entry.targetPath,
-          to: currentTargetPath,
-          expectedHash: entry.expectedHash
-        });
-      } else {
-        console.warn(`${logPrefix} skip missing ${entry.modKey}: ${entry.targetPath} candidates=${candidates.length}`);
-        mutation.warn?.("RE Engine pak normalize skipped a missing managed pak because no unique same-hash candidate was found.", {
-          target: entry.targetPath,
-          candidates: candidates.length
-        });
-        continue;
-      }
-    }
-    const patchNumber = extractPatchNumber(currentName);
-    const normalizedEntry = currentTargetPath === entry.targetPath ? entry : { ...entry, targetPath: currentTargetPath, absolutePath: currentTargetPath, exists: true };
-    records.push({
-      entry: normalizedEntry,
-      deployment,
-      patchNumber,
-      targetFilename: currentName,
-      finalFilename: currentName,
-      finalPatchNumber: patchNumber
-    });
-  }
-  if (records.length === 0) {
-    return;
-  }
-  records.sort((a, b) => a.patchNumber - b.patchNumber || String(a.entry.modKey).localeCompare(String(b.entry.modKey)) || a.targetFilename.localeCompare(b.targetFilename));
-  const selectedEntries = records.map((record) => record.entry);
-  const occupiedUnmanagedFilenames = getUnmanagedOccupiedFilenames(mutation, selectedEntries);
-  let nextPatchNumber = 1;
-  for (let index = 0; index < records.length; index += 1) {
-    let patchNumber = nextPatchNumber;
-    let finalFilename = createReEnginePakName(patchNumber);
-    while (occupiedUnmanagedFilenames.has(finalFilename.toLowerCase())) {
-      patchNumber += 1;
-      finalFilename = createReEnginePakName(patchNumber);
-    }
-    records[index].finalFilename = finalFilename;
-    records[index].finalPatchNumber = patchNumber;
-    nextPatchNumber = patchNumber + 1;
-  }
-  const moving = records.filter((record) => record.targetFilename !== record.finalFilename);
-  if (moving.length === 0) {
-    return;
-  }
-  for (let index = 0; index < moving.length; index += 1) {
-    const record = moving[index];
-    const finalTarget = pathApi.join(mutation.gamePath, record.finalFilename);
-    console.log(`${logPrefix} move ${record.entry.modKey}: ${record.entry.targetPath} -> ${finalTarget}`);
-    mutation.moveDeployment({
-      modKey: record.entry.modKey,
-      from: record.entry.targetPath,
-      to: finalTarget,
-      expectedHash: record.entry.expectedHash
-    });
-    const deployments = getReEnginePakDeployments(record.entry.metaInfo);
-    mutation.setModMetadata({
-      modKey: record.entry.modKey,
-      patch: {
-        reEnginePakDeployments: updateReEnginePakDeployment(deployments, record.deployment, record.finalFilename, record.finalPatchNumber)
-      }
-    });
-  }
-}
-function registerReEnginePakNormalizeHook(context, modType) {
-  if (typeof context.registerManagedDeploymentHook !== "function")
-    return;
-  const phases = ["afterEnable", "afterDisable", "afterUninstall"];
-  const buildMutationOptions = (includeGameFileHashes) => ({
-    modType,
-    includeManagedCurrentHashes: false,
-    includeGameFileHashes,
-    includeGameFiles: {
-      directories: ["{gamePath}"],
-      extensions: [".pak"]
-    }
-  });
-  for (const phase of phases) {
-    context.registerManagedDeploymentHook(phase, { modType }, async () => {
-      const api = context.api;
-      if (typeof api?.vfs?.runManagedDeploymentMutation !== "function")
-        return;
-      let needsHashedAdoptPass = false;
-      await api.vfs.runManagedDeploymentMutation(buildMutationOptions(false), (mutation) => {
-        if (hasMissingReEnginePakDeployments(mutation, { modType })) {
-          needsHashedAdoptPass = true;
-          console.log(`[REEnginePakNormalize] missing managed pak detected; retry with hashes phase=${phase} modType=${modType}`);
-          return;
-        }
-        normalizeReEnginePakFiles(context.api.util.path, mutation, { modType });
-      });
-      if (!needsHashedAdoptPass)
-        return;
-      await api.vfs.runManagedDeploymentMutation(buildMutationOptions(true), (mutation) => {
-        normalizeReEnginePakFiles(context.api.util.path, mutation, { modType });
-      });
-    });
-  }
-}
 
-// extensions/MonsterHunterWilds/index.ts
+// index.ts
 var GAME_ID = 2246340;
 var GAME_NAME = "Monster Hunter Wilds";
 var EXECUTABLE = "MonsterHunterWilds.exe";
@@ -510,12 +240,18 @@ async function fileExists(context, filePath) {
     return false;
   }
 }
-async function getGameRoot(context) {
-  const gamePath = await findGame(context);
-  if (!gamePath) {
-    throw new Error(`Monster Hunter Wilds game path is unavailable: appid=${GAME_ID}`);
+function installMonsterHunterPak(context, files) {
+  const instructions = [];
+  for (const file of files) {
+    const source = normalizeArchivePath(file);
+    if (!source || archiveExtName(source) !== ".pak") continue;
+    instructions.push({
+      type: "copy",
+      source,
+      destination: context.api.util.path.join("pak_mods", archiveBaseName(source))
+    });
   }
-  return gamePath;
+  return { instructions, modType: MOD_TYPE_PAK };
 }
 function getReframeworkRequirements() {
   return [
@@ -647,15 +383,8 @@ function registerPak(context) {
     MOD_TYPE_PAK,
     15,
     (files, gameId) => testReEnginePak(filterMonsterHunterArchiveFiles(files), gameId, GAME_ID),
-    async (files) => {
-      const gameRoot = await getGameRoot(context);
-      return {
-        ...await installReEnginePak(context.api.util.path, context.api.util.fs, filterMonsterHunterArchiveFiles(files), gameRoot),
-        modType: MOD_TYPE_PAK
-      };
-    }
+    (files) => installMonsterHunterPak(context, filterMonsterHunterArchiveFiles(files))
   );
-  registerReEnginePakNormalizeHook(context, MOD_TYPE_PAK);
 }
 function isReframeworkD2dFile(filePath) {
   return archiveBaseName(filePath).toLowerCase().includes("reframework-d2d");
