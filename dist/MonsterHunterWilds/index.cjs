@@ -17,14 +17,14 @@ var __copyProps = (to, from, except, desc) => {
 };
 var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
 
-// index.ts
+// extensions/MonsterHunterWilds/index.ts
 var index_exports = {};
 __export(index_exports, {
   default: () => index_default
 });
 module.exports = __toCommonJS(index_exports);
 
-// ../../utils/engine-utils/dist/re-engine/index.js
+// utils/engine-utils/dist/re-engine/index.js
 function isUnsafeSegment(segment) {
   return segment === "." || segment === ".." || segment.includes("\0");
 }
@@ -197,7 +197,7 @@ function installReEngineNatives(pathApi, files) {
   return { instructions: buildMarkerFolderInstructions(pathApi, files, "natives", ["natives"]) };
 }
 
-// index.ts
+// extensions/MonsterHunterWilds/index.ts
 var GAME_ID = 2246340;
 var GAME_NAME = "Monster Hunter Wilds";
 var EXECUTABLE = "MonsterHunterWilds.exe";

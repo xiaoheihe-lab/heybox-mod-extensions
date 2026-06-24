@@ -15,7 +15,7 @@
     "test": "pnpm run build && node --test test/*.test.mjs"
   },
   "devDependencies": {
-    "heybox-mod-api": "1.7.0",
+    "heybox-mod-api": "1.8.0",
     "typescript": "^5.7.0"
   }
 }

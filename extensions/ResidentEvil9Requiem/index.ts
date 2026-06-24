@@ -1,12 +1,14 @@
 import type { IExtensionContext } from 'heybox-mod-api'
 import {
+  archiveBaseName,
+  archiveExtName,
+  type CopyInstruction,
   installReEngineAutorun,
   installReEngineNatives,
-  installReEnginePak,
   installReEnginePlugins,
   installReEngineReframework,
   installReEngineReframeworkLoader,
-  registerReEnginePakNormalizeHook,
+  normalizeArchivePath,
   testReEngineAutorun,
   testReEngineNatives,
   testReEnginePak,
@@ -27,6 +29,7 @@ const MOD_TYPE_AUTORUN = `${GAME_ID}-autorun`
 const MOD_TYPE_PLUGINS = `${GAME_ID}-plugins`
 const MOD_TYPE_NATIVES = `${GAME_ID}-natives`
 const MOD_TYPE_PAK = `${GAME_ID}-pak`
+const MOD_TYPE_REFRAMEWORK_D2D = `${GAME_ID}-reframework-d2d`
 
 async function findGame(context: IExtensionContext): Promise<string | undefined> {
   const game = await context.api.util.GameStoreHelper.findByAppId(GAME_ID)
@@ -40,14 +43,6 @@ async function fileExists(context: IExtensionContext, filePath: string): Promise
   } catch {
     return false
   }
-}
-
-async function getGameRoot(context: IExtensionContext): Promise<string> {
-  const gamePath = await findGame(context)
-  if (!gamePath) {
-    throw new Error(`${GAME_NAME} game path is unavailable: appid=${GAME_ID}`)
-  }
-  return gamePath
 }
 
 function getReframeworkRequirements() {
@@ -124,18 +119,79 @@ function registerNatives(context: IExtensionContext): void {
   )
 }
 
+function installResidentEvil9Pak(context: IExtensionContext, files: string[]) {
+  const instructions: CopyInstruction[] = []
+
+  for (const file of files) {
+    const source = normalizeArchivePath(file)
+    if (!source || archiveExtName(source) !== '.pak') continue
+
+    instructions.push({
+      type: 'copy',
+      source,
+      destination: context.api.util.path.join('pak_mods', archiveBaseName(source)),
+    })
+  }
+
+  return { instructions, modType: MOD_TYPE_PAK }
+}
+
 function registerPak(context: IExtensionContext): void {
   context.registerModType(MOD_TYPE_PAK, MOD_TYPE_PRIORITY, (gameId) => Number(gameId) === GAME_ID, () => '{gamePath}', () => Promise.resolve(false), { name: 'RE Engine Pak' })
   context.registerInstaller(
     MOD_TYPE_PAK,
     15,
     (files, gameId) => testReEnginePak(files, gameId, GAME_ID),
-    async (files) => {
-      const gameRoot = await getGameRoot(context)
-      return { ...await installReEnginePak(context.api.util.path, context.api.util.fs, files, gameRoot), modType: MOD_TYPE_PAK }
-    }
+    (files) => installResidentEvil9Pak(context, files)
   )
-  registerReEnginePakNormalizeHook(context, MOD_TYPE_PAK)
+}
+
+function isReframeworkD2dFile(filePath: string): boolean {
+  return archiveBaseName(filePath).toLowerCase().includes('reframework-d2d')
+}
+
+function testReframeworkD2d(files: string[], gameId: number | string) {
+  return {
+    supported: Number(gameId) === GAME_ID && files.some(isReframeworkD2dFile),
+    requiredFiles: [],
+  }
+}
+
+function installReframeworkD2d(context: IExtensionContext, files: string[]) {
+  const instructions: CopyInstruction[] = []
+
+  for (const file of files) {
+    const source = normalizeArchivePath(file)
+    if (!source) continue
+
+    const baseName = archiveBaseName(file).toLowerCase()
+    if (baseName.includes('reframework-d2d') && baseName.endsWith('.dll')) {
+      instructions.push({
+        type: 'copy',
+        source,
+        destination: context.api.util.path.join('reframework', 'plugins', 'reframework-d2d.dll'),
+      })
+    }
+    if (baseName.includes('reframework-d2d') && baseName.endsWith('.lua')) {
+      instructions.push({
+        type: 'copy',
+        source,
+        destination: context.api.util.path.join('reframework', 'autorun', 'reframework-d2d.lua'),
+      })
+    }
+  }
+
+  return { instructions, modType: MOD_TYPE_REFRAMEWORK_D2D }
+}
+
+function registerReframeworkD2d(context: IExtensionContext): void {
+  context.registerModType(MOD_TYPE_REFRAMEWORK_D2D, 0, (gameId) => Number(gameId) === GAME_ID, () => '{gamePath}', () => Promise.resolve(false), { name: 'REFramework D2D' })
+  context.registerInstaller(
+    MOD_TYPE_REFRAMEWORK_D2D,
+    99,
+    (files, gameId) => testReframeworkD2d(files, gameId),
+    (files) => installReframeworkD2d(context, files)
+  )
 }
 
 async function main(context: IExtensionContext): Promise<boolean> {
@@ -157,6 +213,7 @@ async function main(context: IExtensionContext): Promise<boolean> {
   registerPlugins(context)
   registerNatives(context)
   registerPak(context)
+  registerReframeworkD2d(context)
 
   context.registerExtensionAction(GAME_ID, 'getReframeworkStatus', () => getReframeworkStatus(context))
   context.registerExtensionAction(GAME_ID, 'getExtensionRequiredMods', () => getReframeworkStatus(context))
