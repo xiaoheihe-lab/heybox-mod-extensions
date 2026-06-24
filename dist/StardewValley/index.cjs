@@ -27,7 +27,7 @@ var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__ge
 ));
 var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
 
-// extensions/StardewValley/src/index.ts
+// src/index.ts
 var index_exports = {};
 __export(index_exports, {
   default: () => index_default
@@ -37,7 +37,7 @@ var import_fs3 = __toESM(require("fs"));
 var import_path3 = __toESM(require("path"));
 var import_os = __toESM(require("os"));
 
-// extensions/StardewValley/src/configMod.ts
+// src/configMod.ts
 var import_fs = __toESM(require("fs"));
 var import_path = __toESM(require("path"));
 var CONFIG_FILE = "config.json";
@@ -123,7 +123,7 @@ function createConfigModActions(getGamePath) {
   };
 }
 
-// extensions/StardewValley/src/manifests.ts
+// src/manifests.ts
 var import_fs2 = __toESM(require("fs"));
 var import_path2 = __toESM(require("path"));
 var MOD_MANIFEST = "manifest.json";
@@ -176,13 +176,47 @@ function stripJsonComments(input) {
   }
   return output;
 }
+function stripJsonTrailingCommas(input) {
+  let output = "";
+  let inString = false;
+  let escaped = false;
+  for (let i = 0; i < input.length; i++) {
+    const char = input[i];
+    if (inString) {
+      output += char;
+      if (escaped) {
+        escaped = false;
+      } else if (char === "\\") {
+        escaped = true;
+      } else if (char === '"') {
+        inString = false;
+      }
+      continue;
+    }
+    if (char === '"') {
+      inString = true;
+      output += char;
+      continue;
+    }
+    if (char === ",") {
+      let nextIndex = i + 1;
+      while (nextIndex < input.length && /\s/.test(input[nextIndex])) nextIndex++;
+      if (input[nextIndex] === "}" || input[nextIndex] === "]") continue;
+    }
+    output += char;
+  }
+  return output;
+}
+function normalizeJSON(input) {
+  return stripJsonTrailingCommas(stripJsonComments(input));
+}
 function parseManifestFile(filePath) {
   const raw = import_fs2.default.readFileSync(filePath, "utf8").replace(/^\uFEFF/, "");
   let parsed;
   try {
     parsed = JSON.parse(raw);
-  } catch {
-    parsed = JSON.parse(stripJsonComments(raw));
+  } catch (e) {
+    parsed = JSON.parse(normalizeJSON(raw));
   }
   if (!parsed || typeof parsed !== "object") throw new Error(`Invalid Stardew manifest: ${filePath}`);
   return parsed;
@@ -249,7 +283,7 @@ function createManifestAttributeExtractor() {
   };
 }
 
-// extensions/StardewValley/src/index.ts
+// src/index.ts
 var GAME_ID = "stardewvalley";
 var STEAM_APPID = 413150;
 var MODS_REL_PATH2 = "Mods";
