@@ -31,7 +31,6 @@ var EXECUTABLE = "Witch's Apocalyptic Journey.exe";
 var MOD_ID = `${GAME_ID}-mod`;
 var MOD_NAME = "Mod";
 var MOD_PATH = path.join("Witch's Apocalyptic Journey_Data", "Mods");
-var ARCHIVE_MODS_ROOT = "Mods";
 var MOD_TYPE_PRIORITY = 100;
 var INSTALLER_PRIORITY = 100;
 var MOD_CONFIG_FILE = "modconfig.json";
@@ -57,48 +56,35 @@ function normalizeFiles(files) {
 function isModConfig(entry) {
   return entry.segments[entry.segments.length - 1]?.toLowerCase() === MOD_CONFIG_FILE;
 }
-function findLayout(files) {
-  const entries = normalizeFiles(files);
-  const config = entries.find(isModConfig);
+function findModRoot(files) {
+  const config = normalizeFiles(files).find(isModConfig);
   if (!config) return null;
-  const [first, second] = config.segments;
-  if (first?.toLowerCase() === ARCHIVE_MODS_ROOT.toLowerCase()) {
-    return second ? { kind: "mods-root", config, modFolder: second } : { kind: "loose", config };
-  }
-  if (config.segments.length > 1) {
-    return { kind: "mod-folder", config, modFolder: first };
-  }
-  return { kind: "loose", config };
+  return {
+    config,
+    rootSegments: config.segments.slice(0, -1)
+  };
 }
-function sanitizeFilename(name, fallback = "UnnamedMod") {
-  const sanitized = String(name || "").trim().replace(/[<>:"/\\|?*\x00-\x1F]/g, "_").replace(/[. ]+$/g, "").replace(/\s+/g, " ");
-  const base = sanitized || fallback;
-  return /^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i.test(base) ? `_${base}` : base;
-}
-function readLooseModName(stagingPath, configPath) {
+function readModName(stagingPath, configPath) {
   if (!stagingPath || typeof stagingPath !== "string") {
-    throw new Error("WitchsApocalypticJourney installer requires stagingPath to read loose ModConfig.json");
+    throw new Error("WitchsApocalypticJourney installer requires stagingPath to read ModConfig.json");
   }
   const configFullPath = path.join(stagingPath, configPath);
   const config = JSON.parse(fs.readFileSync(configFullPath, "utf8"));
   if (typeof config?.ModName !== "string" || !config.ModName.trim()) {
     throw new Error("ModConfig.json must contain a non-empty ModName field");
   }
-  return sanitizeFilename(config.ModName);
+  const modName = config.ModName.trim();
+  if (/[<>:"/\\|?*\x00-\x1F]/.test(modName) || /[. ]$/.test(modName) || /^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i.test(modName)) {
+    throw new Error(`ModConfig.json ModName is not a valid Windows folder name: ${modName}`);
+  }
+  return modName;
 }
-function rewriteDestination(entry, layout, stagingPath) {
-  const [first, ...rest] = entry.segments;
-  if (layout.kind === "mods-root") {
-    if (first?.toLowerCase() !== ARCHIVE_MODS_ROOT.toLowerCase()) return null;
-    if (rest.length === 0) return null;
-    return path.join(sanitizeFilename(rest[0]), ...rest.slice(1));
+function getRelativeToModRoot(entry, rootSegments) {
+  if (entry.segments.length <= rootSegments.length) return null;
+  for (let i = 0; i < rootSegments.length; i++) {
+    if (entry.segments[i] !== rootSegments[i]) return null;
   }
-  if (layout.kind === "mod-folder") {
-    if (first !== layout.modFolder) return null;
-    return path.join(sanitizeFilename(first), ...rest);
-  }
-  const modName = readLooseModName(stagingPath, layout.config.source);
-  return path.join(modName, entry.normalized);
+  return entry.segments.slice(rootSegments.length);
 }
 async function findGame(context) {
   const game = await context.api.util.GameStoreHelper.findByAppId(GAME_ID);
@@ -106,21 +92,22 @@ async function findGame(context) {
 }
 function testMod(files, gameId) {
   return {
-    supported: Number(gameId) === GAME_ID && !!findLayout(files)
+    supported: Number(gameId) === GAME_ID && !!findModRoot(files)
   };
 }
 function installMod(files, stagingPath) {
-  const layout = findLayout(files);
-  if (!layout) {
+  const modRoot = findModRoot(files);
+  if (!modRoot) {
     return { modTypeId: MOD_ID, instructions: [] };
   }
+  const modName = readModName(stagingPath, modRoot.config.source);
   const instructions = normalizeFiles(files).map((entry) => {
-    const destination = rewriteDestination(entry, layout, stagingPath);
-    if (!destination) return null;
+    const relativeSegments = getRelativeToModRoot(entry, modRoot.rootSegments);
+    if (!relativeSegments) return null;
     return {
       type: "copy",
       source: entry.source,
-      destination
+      destination: path.join(modName, ...relativeSegments)
     };
   }).filter(Boolean);
   return {
