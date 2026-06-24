@@ -70,16 +70,60 @@ function stripJsonComments(input: string): string {
   return output
 }
 
+function stripJsonTrailingCommas(input: string): string {
+  let output = ''
+  let inString = false
+  let escaped = false
+
+  for (let i = 0; i < input.length; i++) {
+    const char = input[i]
+
+    if (inString) {
+      output += char
+      if (escaped) {
+        escaped = false
+      } else if (char === '\\') {
+        escaped = true
+      } else if (char === '"') {
+        inString = false
+      }
+      continue
+    }
+
+    if (char === '"') {
+      inString = true
+      output += char
+      continue
+    }
+
+    if (char === ',') {
+      let nextIndex = i + 1
+      while (nextIndex < input.length && /\s/.test(input[nextIndex])) nextIndex++
+      if (input[nextIndex] === '}' || input[nextIndex] === ']') continue
+    }
+
+    output += char
+  }
+
+  return output
+}
+
+function normalizeJSON(input: string): string {
+  return stripJsonTrailingCommas(stripJsonComments(input))
+}
+
 export function parseManifestFile(filePath: string): StardewManifest {
   const raw = fs.readFileSync(filePath, 'utf8').replace(/^\uFEFF/, '')
+  console.log('raw', raw)
   let parsed: unknown
   try {
     parsed = JSON.parse(raw)
-  } catch {
-    parsed = JSON.parse(stripJsonComments(raw))
+  } catch(e) {
+    console.log(`Invalid Stardew manifest: ${filePath}`, 'try noralize', e)
+    parsed = JSON.parse(normalizeJSON(raw))
   }
   if (!parsed || typeof parsed !== 'object') throw new Error(`Invalid Stardew manifest: ${filePath}`)
-  return parsed
+  return parsed as StardewManifest
 }
 
 export function collectManifestFiles(root: string): string[] {
