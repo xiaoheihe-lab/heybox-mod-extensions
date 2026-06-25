@@ -43,26 +43,26 @@ export function registerPalworldModTypes(context: IExtensionContext): void {
     const files = filesFromLocalInfo(input)
     return files.some((file) => /(^|[\\/])UE4SS\.dll$/i.test(file)) && files.some((file) => /(^|[\\/])dwmapi\.dll$/i.test(file))
   }, { name: 'UE4SS' })
-  context.registerInstaller(MOD_TYPE_UE4SS, 100, testUe4ss, (files, stagingPath, options) => installUe4ss(context, files, stagingPath, options))
+  context.registerInstaller(MOD_TYPE_UE4SS, 10, testUe4ss, (files, stagingPath, options) => installUe4ss(context, files, stagingPath, options))
 
   context.registerModType(MOD_TYPE_UNREAL_PAK_TOOL, MOD_TYPE_PRIORITY.unrealPakTool, isPalworld, gameRootTarget, (input) => {
     const files = filesFromLocalInfo(input)
     return files.some((file) => /(^|[\\/])UnrealPak\.exe$/i.test(file))
   }, { name: 'Unreal Pak Tool' })
-  context.registerInstaller(MOD_TYPE_UNREAL_PAK_TOOL, 100, testUnrealPakTool, (files) => installUnrealPakTool(files))
+  context.registerInstaller(MOD_TYPE_UNREAL_PAK_TOOL, 11, testUnrealPakTool, (files) => installUnrealPakTool(files))
 
   context.registerModType(MOD_TYPE_BLUEPRINT_PAK, MOD_TYPE_PRIORITY.blueprintPak, isPalworld, gameRootTarget, (input) => hasPakFile(filesFromLocalInfo(input)), { name: 'Blueprint Mod' })
-  context.registerInstaller(MOD_TYPE_BLUEPRINT_PAK, 100, testPak, (files, stagingPath, options) => installPak(context, files, stagingPath, options))
+  context.registerInstaller(MOD_TYPE_BLUEPRINT_PAK, 40, testPak, (files, stagingPath, options) => installPak(context, files, stagingPath, options))
 
   context.registerModType(MOD_TYPE_LUA_V2, MOD_TYPE_PRIORITY.luaV2, isPalworld, gameRootTarget, (input) => hasLuaFile(filesFromLocalInfo(input)), { name: 'LUA Mod V2' })
-  context.registerInstaller(MOD_TYPE_LUA_V2, 100, testLua, (files, stagingPath) => installLua(files, stagingPath, MOD_TYPE_LUA_V2))
+  context.registerInstaller(MOD_TYPE_LUA_V2, 30, testLua, (files, stagingPath) => installLua(files, stagingPath, MOD_TYPE_LUA_V2))
 
   context.registerModType(MOD_TYPE_PAK, MOD_TYPE_PRIORITY.pak, isPalworld, gameRootTarget, (input) => hasPakFile(filesFromLocalInfo(input)), { name: 'Pak Mod' })
-  context.registerInstaller(MOD_TYPE_PAK, 100, testPak, (files, stagingPath, options) => installPak(context, files, stagingPath, options))
+  context.registerInstaller(MOD_TYPE_PAK, 40, testPak, (files, stagingPath, options) => installPak(context, files, stagingPath, options))
 
   context.registerModType(MOD_TYPE_LUA, MOD_TYPE_PRIORITY.lua, isPalworld, gameRootTarget, (input) => hasLuaFile(filesFromLocalInfo(input)), { name: 'LUA Mod' })
-  context.registerInstaller(MOD_TYPE_LUA, 100, testLua, (files, stagingPath) => installLua(files, stagingPath, MOD_TYPE_LUA))
+  context.registerInstaller(MOD_TYPE_LUA, 31, testLua, (files, stagingPath) => installLua(files, stagingPath, MOD_TYPE_LUA))
 
   context.registerModType(MOD_TYPE_ROOT, MOD_TYPE_PRIORITY.root, isPalworld, gameRootTarget, (input) => testRoot(filesFromLocalInfo(input), GAME_ID).supported, { name: 'Root Mod' })
-  context.registerInstaller(MOD_TYPE_ROOT, 100, testRoot, (files) => installRoot(files))
+  context.registerInstaller(MOD_TYPE_ROOT, 15, testRoot, (files) => installRoot(files))
 }
