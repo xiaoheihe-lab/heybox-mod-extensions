@@ -47,6 +47,15 @@ importers:
         specifier: ^5.7.0
         version: 5.9.3
 
+  extensions/Palworld:
+    devDependencies:
+      heybox-mod-api:
+        specifier: 1.8.0
+        version: 1.8.0
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
+
   extensions/ResidentEvil2:
     dependencies:
       '@heybox-mod-extensions/engine-utils':
