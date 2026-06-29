@@ -99,14 +99,14 @@ function getPatchFileStem(file) {
 function isGraphicsPatchStem(stem) {
   return stem !== null && PATCH_FILE_STEMS.includes(stem);
 }
-function hasGraphicsGpuPatchFile(files) {
+function hasGraphicsPatchSidecarFile(files) {
   return files.some((file) => {
     const name = archiveBasename(file).toLowerCase();
-    return PATCH_FILE_STEMS.some((stem) => new RegExp(`^${stem}\\.patch_\\d+\\.gpu_resources$`, "i").test(name));
+    return PATCH_FILE_STEMS.some((stem) => new RegExp(`^${stem}\\.patch_\\d+\\.(gpu_resources|stream)$`, "i").test(name));
   });
 }
 function hasGraphicsPatchFile(files) {
-  return hasGraphicsGpuPatchFile(files) && files.some((file) => isGraphicsPatchStem(getPatchFileStem(file)));
+  return hasGraphicsPatchSidecarFile(files) && files.some((file) => isGraphicsPatchStem(getPatchFileStem(file)));
 }
 function isPatchSidecarFile(file, allowedExts) {
   const name = archiveBasename(file);

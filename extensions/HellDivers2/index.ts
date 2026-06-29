@@ -107,15 +107,15 @@ function isGraphicsPatchStem(stem: string | null): boolean {
   return stem !== null && PATCH_FILE_STEMS.includes(stem);
 }
 
-function hasGraphicsGpuPatchFile(files: string[]): boolean {
+function hasGraphicsPatchSidecarFile(files: string[]): boolean {
   return files.some((file) => {
     const name = archiveBasename(file).toLowerCase();
-    return PATCH_FILE_STEMS.some((stem) => new RegExp(`^${stem}\\.patch_\\d+\\.gpu_resources$`, 'i').test(name));
+    return PATCH_FILE_STEMS.some((stem) => new RegExp(`^${stem}\\.patch_\\d+\\.(gpu_resources|stream)$`, 'i').test(name));
   });
 }
 
 function hasGraphicsPatchFile(files: string[]): boolean {
-  return hasGraphicsGpuPatchFile(files) && files.some((file) => isGraphicsPatchStem(getPatchFileStem(file)));
+  return hasGraphicsPatchSidecarFile(files) && files.some((file) => isGraphicsPatchStem(getPatchFileStem(file)));
 }
 
 function isPatchSidecarFile(file: string, allowedExts: string[]): boolean {
