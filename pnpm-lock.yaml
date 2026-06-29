@@ -21,6 +21,15 @@ importers:
         specifier: ^5.7.0
         version: 5.9.3
 
+  extensions/HellDivers2:
+    devDependencies:
+      heybox-mod-api:
+        specifier: 1.8.0
+        version: 1.8.0
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
+
   extensions/MonsterHunterRise:
     dependencies:
       '@heybox-mod-extensions/engine-utils':
