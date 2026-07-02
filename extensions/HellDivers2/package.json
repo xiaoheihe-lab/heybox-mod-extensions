@@ -9,6 +9,7 @@
     "test": "echo \"no tests\""
   },
   "devDependencies": {
+    "@heybox-mod-extensions/shared-utils": "workspace:*",
     "heybox-mod-api": "1.8.0",
     "typescript": "^5.7.0"
   }
