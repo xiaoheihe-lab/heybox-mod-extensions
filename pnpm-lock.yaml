@@ -21,6 +21,18 @@ importers:
         specifier: ^5.7.0
         version: 5.9.3
 
+  extensions/HellDivers2:
+    devDependencies:
+      '@heybox-mod-extensions/shared-utils':
+        specifier: workspace:*
+        version: link:../../utils/shared-utils
+      heybox-mod-api:
+        specifier: 1.8.0
+        version: 1.8.0
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
+
   extensions/MonsterHunterRise:
     dependencies:
       '@heybox-mod-extensions/engine-utils':
@@ -177,6 +189,12 @@ importers:
       heybox-mod-api:
         specifier: 1.8.0
         version: 1.8.0
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
+
+  utils/shared-utils:
+    devDependencies:
       typescript:
         specifier: ^5.7.0
         version: 5.9.3
