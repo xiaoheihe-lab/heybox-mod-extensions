@@ -901,8 +901,8 @@ async function main(context) {
         type: "helldivers2_setup",
         display: "toast",
         variant: "warning",
-        title: "Special Instructions for Helldivers 2",
-        content: "Graphics patch mods are automatically renumbered by Heybox. Sound patch mods are not merged and may conflict like in Vortex."
+        title: "\u5730\u72F1\u6F5C\u5175 2 \u5B89\u88C5\u63D0\u793A",
+        content: "\u56FE\u50CF\u548C\u97F3\u6548 patch \u6A21\u7EC4\u4F1A\u7531\u5C0F\u9ED1\u76D2\u81EA\u52A8\u5206\u914D\u5E76\u91CD\u6392\u7F16\u53F7\uFF1B\u5982\u679C\u591A\u4E2A\u6A21\u7EC4\u4FEE\u6539\u540C\u4E00\u6E38\u620F\u8D44\u6E90\uFF0C\u4ECD\u53EF\u80FD\u6309\u6E38\u620F\u52A0\u8F7D\u987A\u5E8F\u4E92\u76F8\u8986\u76D6\u3002"
       });
     }
   });
