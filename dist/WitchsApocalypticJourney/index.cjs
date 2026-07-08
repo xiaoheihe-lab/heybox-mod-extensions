@@ -17,12 +17,96 @@ var __copyProps = (to, from, except, desc) => {
 };
 var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
 
-// extensions/WitchsApocalypticJourney/index.ts
+// index.ts
 var index_exports = {};
 __export(index_exports, {
   default: () => index_default
 });
 module.exports = __toCommonJS(index_exports);
+
+// ../../utils/shared-utils/dist/json.js
+function stripJsonComments(input) {
+  let output = "";
+  let inString = false;
+  let escaped = false;
+  for (let i = 0; i < input.length; i += 1) {
+    const char = input[i];
+    const next = input[i + 1];
+    if (inString) {
+      output += char;
+      if (escaped) {
+        escaped = false;
+      } else if (char === "\\") {
+        escaped = true;
+      } else if (char === '"') {
+        inString = false;
+      }
+      continue;
+    }
+    if (char === '"') {
+      inString = true;
+      output += char;
+      continue;
+    }
+    if (char === "/" && next === "/") {
+      i += 2;
+      while (i < input.length && input[i] !== "\n" && input[i] !== "\r")
+        i += 1;
+      i -= 1;
+      continue;
+    }
+    if (char === "/" && next === "*") {
+      i += 2;
+      while (i < input.length && !(input[i] === "*" && input[i + 1] === "/"))
+        i += 1;
+      if (i >= input.length)
+        throw new Error("Unterminated block comment");
+      i += 1;
+      continue;
+    }
+    output += char;
+  }
+  return output;
+}
+function stripJsonTrailingCommas(input) {
+  let output = "";
+  let inString = false;
+  let escaped = false;
+  for (let i = 0; i < input.length; i += 1) {
+    const char = input[i];
+    if (inString) {
+      output += char;
+      if (escaped) {
+        escaped = false;
+      } else if (char === "\\") {
+        escaped = true;
+      } else if (char === '"') {
+        inString = false;
+      }
+      continue;
+    }
+    if (char === '"') {
+      inString = true;
+      output += char;
+      continue;
+    }
+    if (char === ",") {
+      let nextIndex = i + 1;
+      while (nextIndex < input.length && /\s/.test(input[nextIndex]))
+        nextIndex += 1;
+      if (input[nextIndex] === "}" || input[nextIndex] === "]")
+        continue;
+    }
+    output += char;
+  }
+  return output;
+}
+function formatJSONPlainText(input) {
+  const text = String(input ?? "").replace(/^\uFEFF/, "");
+  return stripJsonTrailingCommas(stripJsonComments(text));
+}
+
+// index.ts
 var fs = require("fs");
 var path = require("path");
 var GAME_ID = 3709430;
@@ -69,7 +153,9 @@ function readModName(stagingPath, configPath) {
     throw new Error("WitchsApocalypticJourney installer requires stagingPath to read ModConfig.json");
   }
   const configFullPath = path.join(stagingPath, configPath);
-  const config = JSON.parse(fs.readFileSync(configFullPath, "utf8"));
+  const configText = fs.readFileSync(configFullPath, "utf8");
+  const normalizedConfigText = formatJSONPlainText(configText);
+  const config = JSON.parse(normalizedConfigText);
   if (typeof config?.ModName !== "string" || !config.ModName.trim()) {
     throw new Error("ModConfig.json must contain a non-empty ModName field");
   }
