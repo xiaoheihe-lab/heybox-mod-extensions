@@ -55,8 +55,8 @@ async function main(context: IExtensionContext) {
         type: 'helldivers2_setup',
         display: 'toast',
         variant: 'warning',
-        title: 'Special Instructions for Helldivers 2',
-        content: 'Graphics patch mods are automatically renumbered by Heybox. Sound patch mods are not merged and may conflict like in Vortex.',
+        title: '地狱潜兵 2 安装提示',
+        content: '图像和音效 patch 模组会由小黑盒自动分配并重排编号；如果多个模组修改同一游戏资源，仍可能按游戏加载顺序互相覆盖。',
       });
     },
   });

@@ -27,8 +27,8 @@ importers:
         specifier: workspace:*
         version: link:../../utils/shared-utils
       heybox-mod-api:
-        specifier: 1.8.0
-        version: 1.8.0
+        specifier: 1.9.0
+        version: 1.9.0
       typescript:
         specifier: ^5.7.0
         version: 5.9.3
@@ -371,6 +371,9 @@ packages:
   heybox-mod-api@1.8.0:
     resolution: {integrity: sha512-pA4jt3AqQpMaRADNuNNbVnLMqWgp3PYuqhT4Ja54HLyqnxHwCnfaJiXWjTkNFo4DLstlJl/YDftPGtafnMJJaQ==}
 
+  heybox-mod-api@1.9.0:
+    resolution: {integrity: sha512-k/lImTSZaNQiMKimi76GltfqwKvaEf3pBn9L7Y2uRQqrck3WzME7Hk08Hvq2PiX2wlhuzYP2MS+xMuH2r62SMA==}
+
   typescript@5.9.3:
     resolution: {integrity: sha512-jl1vZzPDinLr9eUt3J/t7V6FgNEw9QjvBPdysz9KfQDD41fQrC2Y4vKQdiaUpFT4bXlb1RHhLpp8wtm6M5TgSw==}
     engines: {node: '>=14.17'}
@@ -490,5 +493,7 @@ snapshots:
   heybox-mod-api@1.7.0-alpha1: {}
 
   heybox-mod-api@1.8.0: {}
+
+  heybox-mod-api@1.9.0: {}
 
   typescript@5.9.3: {}
