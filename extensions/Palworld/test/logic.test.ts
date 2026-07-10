@@ -5,6 +5,7 @@ import {
   installLua,
   installPak,
   installUnrealPakTool,
+  testLua,
   testPak,
   testRoot,
   testUe4ss,
@@ -58,6 +59,11 @@ async function main() {
   assert.equal(getLuaFolderId(['Mods/CoolLua/scripts/main.lua'], 'ignored.installing'), 'CoolLua')
   assert.equal(getLuaFolderId(['CoolLua/scripts/main.lua'], 'ignored.installing'), 'CoolLua')
   assert.equal(getLuaFolderId(['main.lua'], 'SingleLua.installing'), 'SingleLua')
+  assert.equal(getLuaFolderId(['Pal/Binaries/Win64/ue4ss/Mods/InfiniteWeightInCamp/Scripts/main.lua'], 'ignored.installing'), 'InfiniteWeightInCamp')
+  assert.equal(testLua([
+    'Pal/Binaries/Win64/ue4ss/Mods/InfiniteWeightInCamp/Scripts/config.lua',
+    'Pal/Binaries/Win64/ue4ss/Mods/InfiniteWeightInCamp/Scripts/main.lua',
+  ], 1623730).supported, true)
 
   assert.equal(testRoot(['Pal/Content/Paks/Foo.pak'], 1623730).supported, true)
   assert.equal(testRoot(['Random/Foo.pak'], 1623730).supported, false)
@@ -94,6 +100,24 @@ async function main() {
     source: 'CoolLua/scripts/main.lua',
     destination: 'Pal/Binaries/Win64/Mods/CoolLua/scripts/main.lua',
   })
+
+  const legacyLuaInstall = installLua([
+    'Pal/Binaries/Win64/ue4ss/Mods/InfiniteWeightInCamp/Scripts/config.lua',
+    'Pal/Binaries/Win64/ue4ss/Mods/InfiniteWeightInCamp/Scripts/main.lua',
+  ], 'ignored.installing', MOD_TYPE_LUA)
+  assert.deepEqual(legacyLuaInstall.instructions[0], { type: 'attribute', key: 'palworldFolderId', value: 'InfiniteWeightInCamp' })
+  assert.deepEqual(legacyLuaInstall.instructions.slice(1), [
+    {
+      type: 'copy',
+      source: 'Pal/Binaries/Win64/ue4ss/Mods/InfiniteWeightInCamp/Scripts/config.lua',
+      destination: 'Pal/Binaries/Win64/Mods/InfiniteWeightInCamp/Scripts/config.lua',
+    },
+    {
+      type: 'copy',
+      source: 'Pal/Binaries/Win64/ue4ss/Mods/InfiniteWeightInCamp/Scripts/main.lua',
+      destination: 'Pal/Binaries/Win64/Mods/InfiniteWeightInCamp/Scripts/main.lua',
+    },
+  ])
 }
 
 void main()

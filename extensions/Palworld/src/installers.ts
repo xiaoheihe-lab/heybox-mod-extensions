@@ -57,6 +57,13 @@ export function hasLuaFile(files: string[]): boolean {
   return files.some((file) => LUA_EXTENSIONS.includes(archiveExtName(file)))
 }
 
+function getLegacyUe4ssModsIndex(segments: string[]): number {
+  for (let i = 0; i < segments.length - 2; i += 1) {
+    if (segments[i].toLowerCase() === 'ue4ss' && segments[i + 1].toLowerCase() === 'mods') return i + 1
+  }
+  return -1
+}
+
 export function testUe4ss(files: string[], gameId: number | string) {
   return {
     supported: Number(gameId) === 1623730 && hasBaseName(files, UE4SS_DLL) && hasBaseName(files, UE4SS_DWMAPI),
@@ -197,6 +204,8 @@ export function getLuaFolderId(files: string[], stagingPath?: string): string {
   const luaFiles = files.filter((file) => LUA_EXTENSIONS.includes(archiveExtName(file))).sort((a, b) => a.length - b.length)
   const shortest = luaFiles[0] || ''
   const segments = splitArchivePath(shortest)
+  const legacyModsIndex = getLegacyUe4ssModsIndex(segments)
+  if (legacyModsIndex >= 0 && segments[legacyModsIndex + 1]) return segments[legacyModsIndex + 1]
   const modsIndex = segments.findIndex((segment) => segment.toLowerCase() === 'mods')
   if (modsIndex >= 0 && segments[modsIndex + 1]) return segments[modsIndex + 1]
   if (segments.length > 1) return segments[0]
@@ -216,7 +225,10 @@ export function installLua(files: string[], stagingPath: string | undefined, mod
   for (const file of files) {
     if (!isFileLike(file)) continue
     const segments = splitArchivePath(file)
-    const destination = modsIndex >= 0
+    const legacyModsIndex = getLegacyUe4ssModsIndex(segments)
+    const destination = legacyModsIndex >= 0
+      ? archiveJoin(UE4SS_RUNTIME_PATH, segments.slice(legacyModsIndex).join('/'))
+      : modsIndex >= 0
       ? archiveJoin(UE4SS_RUNTIME_PATH, segments.slice(modsIndex).join('/'))
       : segments.length > 1
         ? archiveJoin(UE4SS_RUNTIME_PATH, 'Mods', folderId, segments.slice(1).join('/'))
