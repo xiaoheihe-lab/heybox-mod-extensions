@@ -1,6 +1,6 @@
 {
   "name": "@heybox-mod-extensions/palworld",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "private": true,
   "scripts": {
     "build": "node ../../internal/build/build.mjs . --local",
