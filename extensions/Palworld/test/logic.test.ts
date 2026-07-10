@@ -89,6 +89,11 @@ async function main() {
   const luaInstall = installLua(['CoolLua/scripts/main.lua'], 'ignored.installing', MOD_TYPE_LUA)
   assert.equal(luaInstall.modType, MOD_TYPE_LUA)
   assert.deepEqual(luaInstall.instructions[0], { type: 'attribute', key: 'palworldFolderId', value: 'CoolLua' })
+  assert.deepEqual(luaInstall.instructions[1], {
+    type: 'copy',
+    source: 'CoolLua/scripts/main.lua',
+    destination: 'Pal/Binaries/Win64/Mods/CoolLua/scripts/main.lua',
+  })
 }
 
 void main()

@@ -7,7 +7,7 @@ export const UE4SS_MOD_ID = '2782'
 export const UNREAL_PAK_TOOL_MOD_ID = '2783'
 
 export const PAL_WIN64_PATH = 'Pal/Binaries/Win64'
-export const UE4SS_RUNTIME_PATH = `${PAL_WIN64_PATH}/ue4ss`
+export const UE4SS_RUNTIME_PATH = PAL_WIN64_PATH
 export const PAK_MODS_PATH = 'Pal/Content/Paks/~mods'
 export const BLUEPRINT_PAK_MODS_PATH = 'Pal/Content/Paks/LogicMods'
 export const UNREAL_PAK_TOOL_PATH = 'UnrealPakTool'
