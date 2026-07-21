@@ -6,7 +6,6 @@ import {
   MODS_FILE,
   MODS_FILE_BACKUP,
   MOD_TYPE_BLUEPRINT_PAK,
-  MOD_TYPE_LUA,
   MOD_TYPE_LUA_V2,
   MOD_TYPE_PAK,
   PAK_EXTENSIONS,
@@ -32,6 +31,7 @@ import {
 } from './paths'
 import { findGamePath } from './requirements'
 import { listPak } from './pak'
+import { getUe4ssModsPath } from './ue4ss'
 
 type Instruction = Record<string, unknown>
 
@@ -119,7 +119,7 @@ export async function installUe4ss(context: IExtensionContext, files: string[], 
       instructions.push({
         type: 'generatefile',
         data,
-        destination: archiveJoin(UE4SS_RUNTIME_PATH, 'Mods', MODS_FILE_BACKUP),
+        destination: archiveJoin(PAL_WIN64_PATH, 'Mods', MODS_FILE_BACKUP),
       })
       continue
     }
@@ -212,8 +212,9 @@ export function getLuaFolderId(files: string[], stagingPath?: string): string {
   return getFallbackFolderId(stagingPath)
 }
 
-export function installLua(files: string[], stagingPath: string | undefined, modType: string) {
+export async function installLua(context: IExtensionContext, files: string[], stagingPath: string | undefined, modType: string) {
   const folderId = getLuaFolderId(files, stagingPath)
+  const modsPath = await getUe4ssModsPath(context)
   const luaFiles = files.filter((file) => LUA_EXTENSIONS.includes(archiveExtName(file))).sort((a, b) => a.length - b.length)
   const shortestSegments = splitArchivePath(luaFiles[0] || '')
   const modsIndex = shortestSegments.findIndex((segment) => segment.toLowerCase() === 'mods')
@@ -227,12 +228,12 @@ export function installLua(files: string[], stagingPath: string | undefined, mod
     const segments = splitArchivePath(file)
     const legacyModsIndex = getLegacyUe4ssModsIndex(segments)
     const destination = legacyModsIndex >= 0
-      ? archiveJoin(UE4SS_RUNTIME_PATH, segments.slice(legacyModsIndex).join('/'))
+      ? archiveJoin(modsPath, segments.slice(legacyModsIndex + 1).join('/'))
       : modsIndex >= 0
-      ? archiveJoin(UE4SS_RUNTIME_PATH, segments.slice(modsIndex).join('/'))
+      ? archiveJoin(modsPath, segments.slice(modsIndex + 1).join('/'))
       : segments.length > 1
-        ? archiveJoin(UE4SS_RUNTIME_PATH, 'Mods', folderId, segments.slice(1).join('/'))
-        : archiveJoin(UE4SS_RUNTIME_PATH, 'Mods', folderId, file)
+        ? archiveJoin(modsPath, folderId, segments.slice(1).join('/'))
+        : archiveJoin(modsPath, folderId, file)
 
     instructions.push({
       type: 'copy',

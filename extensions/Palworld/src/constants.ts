@@ -7,7 +7,7 @@ export const UE4SS_MOD_ID = '2782'
 export const UNREAL_PAK_TOOL_MOD_ID = '2783'
 
 export const PAL_WIN64_PATH = 'Pal/Binaries/Win64'
-export const UE4SS_RUNTIME_PATH = PAL_WIN64_PATH
+export const UE4SS_RUNTIME_PATH = `${PAL_WIN64_PATH}/ue4ss`
 export const PAK_MODS_PATH = 'Pal/Content/Paks/~mods'
 export const BLUEPRINT_PAK_MODS_PATH = 'Pal/Content/Paks/LogicMods'
 export const UNREAL_PAK_TOOL_PATH = 'UnrealPakTool'
@@ -30,14 +30,12 @@ export const MOD_TYPE_ROOT = `${GAME_ID}-root`
 export const MOD_TYPE_BLUEPRINT_PAK = `${GAME_ID}-blueprint-pak`
 export const MOD_TYPE_PAK = `${GAME_ID}-pak`
 export const MOD_TYPE_LUA_V2 = `${GAME_ID}-lua-v2`
-export const MOD_TYPE_LUA = `${GAME_ID}-lua`
 
 export const MOD_TYPE_PRIORITY = {
   ue4ss: 130,
   unrealPakTool: 120,
+  root: 115,
   blueprintPak: 110,
   luaV2: 100,
   pak: 90,
-  lua: 80,
-  root: 70,
 }

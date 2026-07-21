@@ -1,6 +1,7 @@
 import type { IExtensionContext } from 'heybox-mod-api'
-import { MODS_FILE, MODS_FILE_BACKUP, MOD_TYPE_LUA, MOD_TYPE_LUA_V2, UE4SS_RUNTIME_PATH } from './constants'
+import { MODS_FILE, MODS_FILE_BACKUP, MOD_TYPE_LUA_V2 } from './constants'
 import { findGamePath } from './requirements'
+import { getUe4ssModsPath } from './ue4ss'
 
 declare const require: any
 
@@ -35,13 +36,13 @@ async function writeText(filePath: string, data: string): Promise<void> {
   await fs.promises.writeFile(filePath, data, 'utf8')
 }
 
-function getModsDir(gamePath: string): string {
-  return path.join(gamePath, UE4SS_RUNTIME_PATH, 'Mods')
+async function getModsDir(context: IExtensionContext, gamePath: string): Promise<string> {
+  const modsPath = await getUe4ssModsPath(context, gamePath)
+  return path.join(gamePath, ...modsPath.split('/'))
 }
 
-async function ensureModsFile(gamePath: string): Promise<string> {
+async function ensureModsFile(modsDir: string): Promise<string> {
   const fs = require('fs')
-  const modsDir = getModsDir(gamePath)
   const modsFile = path.join(modsDir, MODS_FILE)
   const backup = path.join(modsDir, MODS_FILE_BACKUP)
   await fs.promises.mkdir(modsDir, { recursive: true })
@@ -52,8 +53,8 @@ async function ensureModsFile(gamePath: string): Promise<string> {
   return modsFile
 }
 
-async function readState(gamePath: string): Promise<LuaState> {
-  const statePath = path.join(getModsDir(gamePath), STATE_FILE)
+async function readState(modsDir: string): Promise<LuaState> {
+  const statePath = path.join(modsDir, STATE_FILE)
   const text = await readTextIfExists(statePath)
   if (!text) return {}
   try {
@@ -64,8 +65,8 @@ async function readState(gamePath: string): Promise<LuaState> {
   }
 }
 
-async function writeState(gamePath: string, state: LuaState): Promise<void> {
-  const statePath = path.join(getModsDir(gamePath), STATE_FILE)
+async function writeState(modsDir: string, state: LuaState): Promise<void> {
+  const statePath = path.join(modsDir, STATE_FILE)
   await writeText(statePath, `${JSON.stringify(state, null, 2)}\n`)
 }
 
@@ -80,8 +81,8 @@ async function findFolderId(context: IExtensionContext, modKey: string, modType:
   return folderId
 }
 
-async function addModsFileEntry(gamePath: string, folderId: string): Promise<void> {
-  const modsFile = await ensureModsFile(gamePath)
+async function addModsFileEntry(modsDir: string, folderId: string): Promise<void> {
+  const modsFile = await ensureModsFile(modsDir)
   const data = await readTextIfExists(modsFile) ?? ''
   const lines = data.split(/\r?\n/).filter((line) => line.length > 0)
   const target = `${folderId} : 1`
@@ -92,8 +93,8 @@ async function addModsFileEntry(gamePath: string, folderId: string): Promise<voi
   }
 }
 
-async function removeModsFileEntry(gamePath: string, folderId: string): Promise<void> {
-  const modsFile = await ensureModsFile(gamePath)
+async function removeModsFileEntry(modsDir: string, folderId: string): Promise<void> {
+  const modsFile = await ensureModsFile(modsDir)
   const data = await readTextIfExists(modsFile) ?? ''
   const target = `${folderId} : 1`
   const lines = data.split(/\r?\n/).filter((line) => line.trim() !== target)
@@ -103,27 +104,29 @@ async function removeModsFileEntry(gamePath: string, folderId: string): Promise<
 async function onLuaEnabled(context: IExtensionContext, modKey: string, modType: string): Promise<void> {
   const gamePath = await findGamePath(context)
   if (!gamePath) return
+  const modsDir = await getModsDir(context, gamePath)
   const folderId = await findFolderId(context, modKey, modType)
   if (!folderId) return
-  await addModsFileEntry(gamePath, folderId)
-  const state = await readState(gamePath)
+  await addModsFileEntry(modsDir, folderId)
+  const state = await readState(modsDir)
   state[modKey] = folderId
-  await writeState(gamePath, state)
+  await writeState(modsDir, state)
 }
 
 async function onLuaRemoved(context: IExtensionContext, modKey: string): Promise<void> {
   const gamePath = await findGamePath(context)
   if (!gamePath) return
-  const state = await readState(gamePath)
+  const modsDir = await getModsDir(context, gamePath)
+  const state = await readState(modsDir)
   const folderId = state[modKey]
   if (!folderId) return
-  await removeModsFileEntry(gamePath, folderId)
+  await removeModsFileEntry(modsDir, folderId)
   delete state[modKey]
-  await writeState(gamePath, state)
+  await writeState(modsDir, state)
 }
 
 export function registerLuaModsFileHooks(context: IExtensionContext): void {
-  for (const modType of [MOD_TYPE_LUA_V2, MOD_TYPE_LUA]) {
+  for (const modType of [MOD_TYPE_LUA_V2]) {
     context.registerManagedDeploymentHook('afterEnable', { modType }, async (payload) => {
       await onLuaEnabled(context, String(payload.modKey || ''), modType)
     })

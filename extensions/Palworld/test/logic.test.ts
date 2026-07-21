@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { MOD_TYPE_BLUEPRINT_PAK, MOD_TYPE_LUA, MOD_TYPE_PAK } from '../src/constants'
+import { MOD_TYPE_BLUEPRINT_PAK, MOD_TYPE_LUA_V2, MOD_TYPE_PAK } from '../src/constants'
 import {
   getLuaFolderId,
   installLua,
@@ -12,6 +12,13 @@ import {
   testUnrealPakTool,
 } from '../src/installers'
 import { parsePakListOutput } from '../src/pak'
+import { getOverridesModsFolderPath, getUe4ssModsPath } from '../src/ue4ss'
+
+declare const require: any
+
+const fs = require('fs')
+const os = require('os')
+const path = require('path')
 
 function fakeContext() {
   return {
@@ -92,32 +99,51 @@ async function main() {
   ].join('\n'))
   assert.equal(ordinary?.modType, MOD_TYPE_PAK)
 
-  const luaInstall = installLua(['CoolLua/scripts/main.lua'], 'ignored.installing', MOD_TYPE_LUA)
-  assert.equal(luaInstall.modType, MOD_TYPE_LUA)
+  const luaInstall = await installLua(fakeContext(), ['CoolLua/scripts/main.lua'], 'ignored.installing', MOD_TYPE_LUA_V2)
+  assert.equal(luaInstall.modType, MOD_TYPE_LUA_V2)
   assert.deepEqual(luaInstall.instructions[0], { type: 'attribute', key: 'palworldFolderId', value: 'CoolLua' })
   assert.deepEqual(luaInstall.instructions[1], {
     type: 'copy',
     source: 'CoolLua/scripts/main.lua',
-    destination: 'Pal/Binaries/Win64/Mods/CoolLua/scripts/main.lua',
+      destination: 'Pal/Binaries/Win64/ue4ss/Mods/CoolLua/scripts/main.lua',
   })
 
-  const legacyLuaInstall = installLua([
+  const legacyLuaInstall = await installLua(fakeContext(), [
     'Pal/Binaries/Win64/ue4ss/Mods/InfiniteWeightInCamp/Scripts/config.lua',
     'Pal/Binaries/Win64/ue4ss/Mods/InfiniteWeightInCamp/Scripts/main.lua',
-  ], 'ignored.installing', MOD_TYPE_LUA)
+  ], 'ignored.installing', MOD_TYPE_LUA_V2)
   assert.deepEqual(legacyLuaInstall.instructions[0], { type: 'attribute', key: 'palworldFolderId', value: 'InfiniteWeightInCamp' })
   assert.deepEqual(legacyLuaInstall.instructions.slice(1), [
     {
       type: 'copy',
       source: 'Pal/Binaries/Win64/ue4ss/Mods/InfiniteWeightInCamp/Scripts/config.lua',
-      destination: 'Pal/Binaries/Win64/Mods/InfiniteWeightInCamp/Scripts/config.lua',
+      destination: 'Pal/Binaries/Win64/ue4ss/Mods/InfiniteWeightInCamp/Scripts/config.lua',
     },
     {
       type: 'copy',
       source: 'Pal/Binaries/Win64/ue4ss/Mods/InfiniteWeightInCamp/Scripts/main.lua',
-      destination: 'Pal/Binaries/Win64/Mods/InfiniteWeightInCamp/Scripts/main.lua',
+      destination: 'Pal/Binaries/Win64/ue4ss/Mods/InfiniteWeightInCamp/Scripts/main.lua',
     },
   ])
+
+  assert.equal(getOverridesModsFolderPath('[Overrides]\nModsFolderPath = CustomMods\n'), 'CustomMods')
+  assert.equal(getOverridesModsFolderPath('[Other]\nModsFolderPath = Ignored\n'), undefined)
+  assert.equal(await getUe4ssModsPath(fakeContext()), 'Pal/Binaries/Win64/ue4ss/Mods')
+  const gamePath = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'palworld-ue4ss-'))
+  try {
+    const dllDirectory = path.join(gamePath, 'Pal', 'Binaries', 'Win64', 'ue4ss')
+    await fs.promises.mkdir(dllDirectory, { recursive: true })
+    const rootDllDirectory = path.dirname(dllDirectory)
+    await fs.promises.writeFile(path.join(rootDllDirectory, 'UE4SS.dll'), '')
+    await fs.promises.writeFile(path.join(rootDllDirectory, 'UE4SS-settings.ini'), '[Overrides]\nModsFolderPath = RootMods\n')
+    await fs.promises.writeFile(path.join(dllDirectory, 'UE4SS.dll'), '')
+    await fs.promises.writeFile(path.join(dllDirectory, 'UE4SS-settings.ini'), '[Overrides]\nModsFolderPath = CustomMods\n')
+    assert.equal(await getUe4ssModsPath(fakeContext(), gamePath), 'Pal/Binaries/Win64/ue4ss/CustomMods')
+    await fs.promises.rm(path.join(dllDirectory, 'UE4SS-settings.ini'))
+    assert.equal(await getUe4ssModsPath(fakeContext(), gamePath), 'Pal/Binaries/Win64/ue4ss/Mods')
+  } finally {
+    await fs.promises.rm(gamePath, { recursive: true, force: true })
+  }
 }
 
 void main()
