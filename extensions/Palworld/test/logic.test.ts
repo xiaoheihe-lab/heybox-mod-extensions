@@ -3,6 +3,7 @@ import { MOD_TYPE_BLUEPRINT_PAK, MOD_TYPE_LUA_V2, MOD_TYPE_PAK } from '../src/co
 import {
   getLuaFolderId,
   installLua,
+  installUe4ss,
   installPak,
   installUnrealPakTool,
   testLua,
@@ -35,6 +36,17 @@ function fakeContext() {
 async function main() {
   assert.equal(testUe4ss(['UE4SS.dll', 'dwmapi.dll'], 1623730).supported, true)
   assert.equal(testUe4ss(['UE4SS.dll'], 1623730).supported, false)
+
+  const ue4ssInstall = await installUe4ss({
+    api: { util: { fs: { readFile: async () => 'bUseUObjectArrayCache = true' } } },
+  } as any, ['release/dwmapi.dll', 'release/ue4ss/UE4SS.dll', 'release/ue4ss/UE4SS-settings.ini', 'release/ue4ss/Mods/mods.txt', 'release/ue4ss/xinput1_3.dll', 'outside/ignored.txt'])
+  assert.deepEqual(ue4ssInstall.instructions, [
+    { type: 'copy', source: 'release/dwmapi.dll', destination: 'Pal/Binaries/Win64/dwmapi.dll' },
+    { type: 'copy', source: 'release/ue4ss/UE4SS.dll', destination: 'Pal/Binaries/Win64/ue4ss/UE4SS.dll' },
+    { type: 'generatefile', data: 'bUseUObjectArrayCache = false', destination: 'Pal/Binaries/Win64/ue4ss/UE4SS-settings.ini' },
+    { type: 'generatefile', data: 'bUseUObjectArrayCache = true', destination: 'Pal/Binaries/Win64/ue4ss/Mods/mods.txt.original' },
+    { type: 'copy', source: 'release/ue4ss/xinput1_3.dll', destination: 'Pal/Binaries/Win64/ue4ss/xinput1_3.dll' },
+  ])
 
   assert.equal(testUnrealPakTool(['UnrealPak.exe'], 1623730).supported, true)
   assert.equal(testUnrealPakTool(['Readme.txt'], 1623730).supported, false)
