@@ -102,15 +102,15 @@ export function testRoot(files: string[], gameId: number | string) {
 
 export async function installUe4ss(context: IExtensionContext, files: string[], stagingPath?: string, options?: any) {
   const fs = context.api.util.fs
-  const wrapperSegments = stripKnownTopWrapper(files, (file) => {
-    const base = archiveBaseName(file).toLowerCase()
-    return [UE4SS_DLL, UE4SS_DWMAPI, UE4SS_SETTINGS].some((name) => name.toLowerCase() === base)
-  })
+  const dwmapiFile = files.find((file) => archiveBaseName(file).toLowerCase() === UE4SS_DWMAPI.toLowerCase())
+  const anchorSegments = splitArchivePath(dwmapiFile || '').slice(0, -1)
   const instructions: Instruction[] = []
 
   for (const file of files) {
     if (!isFileLike(file)) continue
-    const relative = removeLeadingSegments(file, wrapperSegments) || archiveBaseName(file)
+    const segments = splitArchivePath(file)
+    if (!anchorSegments.every((segment, index) => segments[index]?.toLowerCase() === segment.toLowerCase())) continue
+    const relative = removeLeadingSegments(file, anchorSegments.length) || archiveBaseName(file)
     const base = archiveBaseName(file)
 
     if (base.toLowerCase() === MODS_FILE.toLowerCase()) {
@@ -119,7 +119,7 @@ export async function installUe4ss(context: IExtensionContext, files: string[], 
       instructions.push({
         type: 'generatefile',
         data,
-        destination: archiveJoin(PAL_WIN64_PATH, 'Mods', MODS_FILE_BACKUP),
+        destination: archiveJoin(PAL_WIN64_PATH, splitArchivePath(relative).slice(0, -1).join('/'), MODS_FILE_BACKUP),
       })
       continue
     }
