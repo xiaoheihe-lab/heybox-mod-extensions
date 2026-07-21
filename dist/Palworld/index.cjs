@@ -17,14 +17,14 @@ var __copyProps = (to, from, except, desc) => {
 };
 var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
 
-// extensions/Palworld/index.ts
+// index.ts
 var index_exports = {};
 __export(index_exports, {
   default: () => src_default
 });
 module.exports = __toCommonJS(index_exports);
 
-// extensions/Palworld/src/constants.ts
+// src/constants.ts
 var GAME_ID = 1623730;
 var GAME_NAME = "Palworld";
 var EXECUTABLE = "Palworld.exe";
@@ -32,7 +32,7 @@ var STEAM_APP_ID = "1623730";
 var UE4SS_MOD_ID = "2782";
 var UNREAL_PAK_TOOL_MOD_ID = "2783";
 var PAL_WIN64_PATH = "Pal/Binaries/Win64";
-var UE4SS_RUNTIME_PATH = PAL_WIN64_PATH;
+var UE4SS_RUNTIME_PATH = `${PAL_WIN64_PATH}/ue4ss`;
 var PAK_MODS_PATH = "Pal/Content/Paks/~mods";
 var BLUEPRINT_PAK_MODS_PATH = "Pal/Content/Paks/LogicMods";
 var UNREAL_PAK_TOOL_PATH = "UnrealPakTool";
@@ -52,18 +52,16 @@ var MOD_TYPE_ROOT = `${GAME_ID}-root`;
 var MOD_TYPE_BLUEPRINT_PAK = `${GAME_ID}-blueprint-pak`;
 var MOD_TYPE_PAK = `${GAME_ID}-pak`;
 var MOD_TYPE_LUA_V2 = `${GAME_ID}-lua-v2`;
-var MOD_TYPE_LUA = `${GAME_ID}-lua`;
 var MOD_TYPE_PRIORITY = {
   ue4ss: 130,
   unrealPakTool: 120,
+  root: 115,
   blueprintPak: 110,
   luaV2: 100,
-  pak: 90,
-  lua: 80,
-  root: 70
+  pak: 90
 };
 
-// extensions/Palworld/src/requirements.ts
+// src/requirements.ts
 async function fileExists(context, filePath) {
   try {
     const stat = await context.api.util.fs.stat(filePath);
@@ -95,10 +93,10 @@ function getRequirementItems() {
 }
 async function getRequirementStatus(context, gamePath) {
   const resolvedGamePath = String(gamePath || await findGamePath(context) || "");
-  const path4 = context.api.util.path;
-  const ue4ssDllPath = resolvedGamePath ? path4.join(resolvedGamePath, PAL_WIN64_PATH, UE4SS_DLL) : "";
-  const dwmapiPath = resolvedGamePath ? path4.join(resolvedGamePath, PAL_WIN64_PATH, UE4SS_DWMAPI) : "";
-  const unrealPakPath = resolvedGamePath ? path4.join(resolvedGamePath, UNREAL_PAK_TOOL_PATH, UNREAL_PAK_EXE) : "";
+  const path5 = context.api.util.path;
+  const ue4ssDllPath = resolvedGamePath ? path5.join(resolvedGamePath, PAL_WIN64_PATH, UE4SS_DLL) : "";
+  const dwmapiPath = resolvedGamePath ? path5.join(resolvedGamePath, PAL_WIN64_PATH, UE4SS_DWMAPI) : "";
+  const unrealPakPath = resolvedGamePath ? path5.join(resolvedGamePath, UNREAL_PAK_TOOL_PATH, UNREAL_PAK_EXE) : "";
   const hasUe4ss = !!resolvedGamePath && await fileExists(context, ue4ssDllPath) && await fileExists(context, dwmapiPath);
   const hasUnrealPakTool = !!resolvedGamePath && await fileExists(context, unrealPakPath);
   const requirements = [];
@@ -123,124 +121,8 @@ async function getExtensionRequiredMods(context, gamePath) {
   };
 }
 
-// extensions/Palworld/src/luaModsFile.ts
+// src/paths.ts
 var path = require("path");
-var STATE_FILE = ".heybox-palworld-lua-mods.json";
-async function pathExists(filePath) {
-  const fs = require("fs");
-  try {
-    await fs.promises.stat(filePath);
-    return true;
-  } catch {
-    return false;
-  }
-}
-async function readTextIfExists(filePath) {
-  const fs = require("fs");
-  try {
-    return await fs.promises.readFile(filePath, "utf8");
-  } catch {
-    return null;
-  }
-}
-async function writeText(filePath, data) {
-  const fs = require("fs");
-  await fs.promises.mkdir(path.dirname(filePath), { recursive: true });
-  await fs.promises.writeFile(filePath, data, "utf8");
-}
-function getModsDir(gamePath) {
-  return path.join(gamePath, UE4SS_RUNTIME_PATH, "Mods");
-}
-async function ensureModsFile(gamePath) {
-  const fs = require("fs");
-  const modsDir = getModsDir(gamePath);
-  const modsFile = path.join(modsDir, MODS_FILE);
-  const backup = path.join(modsDir, MODS_FILE_BACKUP);
-  await fs.promises.mkdir(modsDir, { recursive: true });
-  if (!await pathExists(modsFile)) {
-    const backupData = await readTextIfExists(backup);
-    await writeText(modsFile, backupData ?? "\r\n");
-  }
-  return modsFile;
-}
-async function readState(gamePath) {
-  const statePath = path.join(getModsDir(gamePath), STATE_FILE);
-  const text = await readTextIfExists(statePath);
-  if (!text) return {};
-  try {
-    const parsed = JSON.parse(text);
-    return parsed && typeof parsed === "object" ? parsed : {};
-  } catch {
-    return {};
-  }
-}
-async function writeState(gamePath, state) {
-  const statePath = path.join(getModsDir(gamePath), STATE_FILE);
-  await writeText(statePath, `${JSON.stringify(state, null, 2)}
-`);
-}
-async function findFolderId(context, modKey, modType) {
-  let folderId = "";
-  await context.api.vfs.runManagedDeploymentMutation({ modType }, (mutation) => {
-    const entry = Array.isArray(mutation?.entries) ? mutation.entries.find((item) => item?.modKey === modKey && item?.metaInfo?.palworldFolderId) : null;
-    folderId = String(entry?.metaInfo?.palworldFolderId || "");
-  });
-  return folderId;
-}
-async function addModsFileEntry(gamePath, folderId) {
-  const modsFile = await ensureModsFile(gamePath);
-  const data = await readTextIfExists(modsFile) ?? "";
-  const lines = data.split(/\r?\n/).filter((line) => line.length > 0);
-  const target = `${folderId} : 1`;
-  if (!lines.some((line) => line.trim() === target)) {
-    const insertAt = Math.max(0, lines.length - 2);
-    lines.splice(insertAt, 0, target);
-    await writeText(modsFile, lines.join("\r\n"));
-  }
-}
-async function removeModsFileEntry(gamePath, folderId) {
-  const modsFile = await ensureModsFile(gamePath);
-  const data = await readTextIfExists(modsFile) ?? "";
-  const target = `${folderId} : 1`;
-  const lines = data.split(/\r?\n/).filter((line) => line.trim() !== target);
-  await writeText(modsFile, lines.join("\r\n"));
-}
-async function onLuaEnabled(context, modKey, modType) {
-  const gamePath = await findGamePath(context);
-  if (!gamePath) return;
-  const folderId = await findFolderId(context, modKey, modType);
-  if (!folderId) return;
-  await addModsFileEntry(gamePath, folderId);
-  const state = await readState(gamePath);
-  state[modKey] = folderId;
-  await writeState(gamePath, state);
-}
-async function onLuaRemoved(context, modKey) {
-  const gamePath = await findGamePath(context);
-  if (!gamePath) return;
-  const state = await readState(gamePath);
-  const folderId = state[modKey];
-  if (!folderId) return;
-  await removeModsFileEntry(gamePath, folderId);
-  delete state[modKey];
-  await writeState(gamePath, state);
-}
-function registerLuaModsFileHooks(context) {
-  for (const modType of [MOD_TYPE_LUA_V2, MOD_TYPE_LUA]) {
-    context.registerManagedDeploymentHook("afterEnable", { modType }, async (payload) => {
-      await onLuaEnabled(context, String(payload.modKey || ""), modType);
-    });
-    context.registerManagedDeploymentHook("afterDisable", { modType }, async (payload) => {
-      await onLuaRemoved(context, String(payload.modKey || ""));
-    });
-    context.registerManagedDeploymentHook("afterUninstall", { modType }, async (payload) => {
-      await onLuaRemoved(context, String(payload.modKey || ""));
-    });
-  }
-}
-
-// extensions/Palworld/src/paths.ts
-var path2 = require("path");
 function normalizeArchivePath(filePath) {
   return String(filePath || "").replace(/\\/g, "/").replace(/^\/+/, "");
 }
@@ -265,7 +147,7 @@ function removeLeadingSegments(filePath, count) {
 function getStagingSourcePath(file, stagingPath, sourcePathByFile) {
   const direct = sourcePathByFile?.[file];
   if (direct) return direct;
-  return path2.join(String(stagingPath || ""), file);
+  return path.join(String(stagingPath || ""), file);
 }
 function stripKnownTopWrapper(files, predicate) {
   const matched = files.filter(predicate).map(splitArchivePath).filter((parts) => parts.length > 0);
@@ -280,8 +162,182 @@ function stripKnownTopWrapper(files, predicate) {
   return common;
 }
 
-// extensions/Palworld/src/pak.ts
+// src/ue4ss.ts
+var fs = require("fs");
+var path2 = require("path");
+function getOverridesModsFolderPath(settings) {
+  let inOverrides = false;
+  for (const line of String(settings || "").split(/\r?\n/)) {
+    const section = line.match(/^\s*\[([^\]]+)]\s*$/);
+    if (section) {
+      inOverrides = section[1].trim().toLowerCase() === "overrides";
+      continue;
+    }
+    if (!inOverrides) continue;
+    const match = line.match(/^\s*ModsFolderPath\s*=\s*(.*?)\s*$/i);
+    if (match) return match[1].trim();
+  }
+  return void 0;
+}
+async function findUe4ssDllDirectory(directory) {
+  const preferredDirectory = path2.join(directory, "ue4ss");
+  try {
+    const preferredEntries = await fs.promises.readdir(preferredDirectory, { withFileTypes: true });
+    if (preferredEntries.some((entry) => entry.isFile() && entry.name.toLowerCase() === UE4SS_DLL.toLowerCase())) {
+      return preferredDirectory;
+    }
+  } catch {
+  }
+  let entries;
+  try {
+    entries = await fs.promises.readdir(directory, { withFileTypes: true });
+  } catch {
+    return void 0;
+  }
+  const dll = entries.find((entry) => entry.isFile() && entry.name.toLowerCase() === UE4SS_DLL.toLowerCase());
+  if (dll) return directory;
+  for (const entry of entries.filter((item) => item.isDirectory()).sort((a, b) => a.name.localeCompare(b.name))) {
+    const found = await findUe4ssDllDirectory(path2.join(directory, entry.name));
+    if (found) return found;
+  }
+  return void 0;
+}
+async function getUe4ssModsPath(context, gamePath) {
+  const resolvedGamePath = String(gamePath || await findGamePath(context) || "");
+  if (!resolvedGamePath) return archiveJoin(UE4SS_RUNTIME_PATH, "Mods");
+  const win64Path = path2.join(resolvedGamePath, PAL_WIN64_PATH);
+  const dllDirectory = await findUe4ssDllDirectory(win64Path);
+  if (!dllDirectory) return archiveJoin(UE4SS_RUNTIME_PATH, "Mods");
+  const settingsPath = path2.join(dllDirectory, UE4SS_SETTINGS);
+  try {
+    const settings = await fs.promises.readFile(settingsPath, "utf8");
+    const configuredPath = getOverridesModsFolderPath(settings);
+    return archiveJoin(path2.relative(resolvedGamePath, dllDirectory), configuredPath || "Mods");
+  } catch {
+    return archiveJoin(UE4SS_RUNTIME_PATH, "Mods");
+  }
+}
+
+// src/luaModsFile.ts
 var path3 = require("path");
+var STATE_FILE = ".heybox-palworld-lua-mods.json";
+async function pathExists(filePath) {
+  const fs2 = require("fs");
+  try {
+    await fs2.promises.stat(filePath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+async function readTextIfExists(filePath) {
+  const fs2 = require("fs");
+  try {
+    return await fs2.promises.readFile(filePath, "utf8");
+  } catch {
+    return null;
+  }
+}
+async function writeText(filePath, data) {
+  const fs2 = require("fs");
+  await fs2.promises.mkdir(path3.dirname(filePath), { recursive: true });
+  await fs2.promises.writeFile(filePath, data, "utf8");
+}
+async function getModsDir(context, gamePath) {
+  const modsPath = await getUe4ssModsPath(context, gamePath);
+  return path3.join(gamePath, ...modsPath.split("/"));
+}
+async function ensureModsFile(modsDir) {
+  const fs2 = require("fs");
+  const modsFile = path3.join(modsDir, MODS_FILE);
+  const backup = path3.join(modsDir, MODS_FILE_BACKUP);
+  await fs2.promises.mkdir(modsDir, { recursive: true });
+  if (!await pathExists(modsFile)) {
+    const backupData = await readTextIfExists(backup);
+    await writeText(modsFile, backupData ?? "\r\n");
+  }
+  return modsFile;
+}
+async function readState(modsDir) {
+  const statePath = path3.join(modsDir, STATE_FILE);
+  const text = await readTextIfExists(statePath);
+  if (!text) return {};
+  try {
+    const parsed = JSON.parse(text);
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+async function writeState(modsDir, state) {
+  const statePath = path3.join(modsDir, STATE_FILE);
+  await writeText(statePath, `${JSON.stringify(state, null, 2)}
+`);
+}
+async function findFolderId(context, modKey, modType) {
+  let folderId = "";
+  await context.api.vfs.runManagedDeploymentMutation({ modType }, (mutation) => {
+    const entry = Array.isArray(mutation?.entries) ? mutation.entries.find((item) => item?.modKey === modKey && item?.metaInfo?.palworldFolderId) : null;
+    folderId = String(entry?.metaInfo?.palworldFolderId || "");
+  });
+  return folderId;
+}
+async function addModsFileEntry(modsDir, folderId) {
+  const modsFile = await ensureModsFile(modsDir);
+  const data = await readTextIfExists(modsFile) ?? "";
+  const lines = data.split(/\r?\n/).filter((line) => line.length > 0);
+  const target = `${folderId} : 1`;
+  if (!lines.some((line) => line.trim() === target)) {
+    const insertAt = Math.max(0, lines.length - 2);
+    lines.splice(insertAt, 0, target);
+    await writeText(modsFile, lines.join("\r\n"));
+  }
+}
+async function removeModsFileEntry(modsDir, folderId) {
+  const modsFile = await ensureModsFile(modsDir);
+  const data = await readTextIfExists(modsFile) ?? "";
+  const target = `${folderId} : 1`;
+  const lines = data.split(/\r?\n/).filter((line) => line.trim() !== target);
+  await writeText(modsFile, lines.join("\r\n"));
+}
+async function onLuaEnabled(context, modKey, modType) {
+  const gamePath = await findGamePath(context);
+  if (!gamePath) return;
+  const modsDir = await getModsDir(context, gamePath);
+  const folderId = await findFolderId(context, modKey, modType);
+  if (!folderId) return;
+  await addModsFileEntry(modsDir, folderId);
+  const state = await readState(modsDir);
+  state[modKey] = folderId;
+  await writeState(modsDir, state);
+}
+async function onLuaRemoved(context, modKey) {
+  const gamePath = await findGamePath(context);
+  if (!gamePath) return;
+  const modsDir = await getModsDir(context, gamePath);
+  const state = await readState(modsDir);
+  const folderId = state[modKey];
+  if (!folderId) return;
+  await removeModsFileEntry(modsDir, folderId);
+  delete state[modKey];
+  await writeState(modsDir, state);
+}
+function registerLuaModsFileHooks(context) {
+  for (const modType of [MOD_TYPE_LUA_V2]) {
+    context.registerManagedDeploymentHook("afterEnable", { modType }, async (payload) => {
+      await onLuaEnabled(context, String(payload.modKey || ""), modType);
+    });
+    context.registerManagedDeploymentHook("afterDisable", { modType }, async (payload) => {
+      await onLuaRemoved(context, String(payload.modKey || ""));
+    });
+    context.registerManagedDeploymentHook("afterUninstall", { modType }, async (payload) => {
+      await onLuaRemoved(context, String(payload.modKey || ""));
+    });
+  }
+}
+
+// src/pak.ts
+var path4 = require("path");
 var BLUEPRINT_SEGMENT = "mods";
 var MAX_BUFFER = 10 * 1024 * 1024;
 function normalizePakPath(filePath) {
@@ -318,7 +374,7 @@ function parsePakListOutput(logText) {
 }
 async function listPak(context, gamePath, pakPath) {
   const childProcess = require("child_process");
-  const unrealPakExe = path3.join(gamePath, UNREAL_PAK_TOOL_PATH, UNREAL_PAK_EXE);
+  const unrealPakExe = path4.join(gamePath, UNREAL_PAK_TOOL_PATH, UNREAL_PAK_EXE);
   return await new Promise((resolve, reject) => {
     childProcess.execFile(
       unrealPakExe,
@@ -339,7 +395,7 @@ async function listPak(context, gamePath, pakPath) {
   });
 }
 
-// extensions/Palworld/src/installers.ts
+// src/installers.ts
 function hasBaseName(files, name) {
   const lower = name.toLowerCase();
   return files.some((file) => archiveBaseName(file).toLowerCase() === lower);
@@ -395,7 +451,7 @@ function testRoot(files, gameId) {
   return { supported, requiredFiles: [] };
 }
 async function installUe4ss(context, files, stagingPath, options) {
-  const fs = context.api.util.fs;
+  const fs2 = context.api.util.fs;
   const wrapperSegments = stripKnownTopWrapper(files, (file) => {
     const base = archiveBaseName(file).toLowerCase();
     return [UE4SS_DLL, UE4SS_DWMAPI, UE4SS_SETTINGS].some((name) => name.toLowerCase() === base);
@@ -407,17 +463,17 @@ async function installUe4ss(context, files, stagingPath, options) {
     const base = archiveBaseName(file);
     if (base.toLowerCase() === MODS_FILE.toLowerCase()) {
       const sourcePath = getStagingSourcePath(file, stagingPath, options?.sourcePathByFile);
-      const data = await fs.readFile(sourcePath, { encoding: "utf8" });
+      const data = await fs2.readFile(sourcePath, { encoding: "utf8" });
       instructions.push({
         type: "generatefile",
         data,
-        destination: archiveJoin(UE4SS_RUNTIME_PATH, "Mods", MODS_FILE_BACKUP)
+        destination: archiveJoin(PAL_WIN64_PATH, "Mods", MODS_FILE_BACKUP)
       });
       continue;
     }
     if (base.toLowerCase() === UE4SS_SETTINGS.toLowerCase()) {
       const sourcePath = getStagingSourcePath(file, stagingPath, options?.sourcePathByFile);
-      const data = await fs.readFile(sourcePath, { encoding: "utf8" });
+      const data = await fs2.readFile(sourcePath, { encoding: "utf8" });
       instructions.push({
         type: "generatefile",
         data: data.replace(/bUseUObjectArrayCache\s*=\s*true/gm, "bUseUObjectArrayCache = false"),
@@ -488,8 +544,9 @@ function getLuaFolderId(files, stagingPath) {
   if (segments.length > 1) return segments[0];
   return getFallbackFolderId(stagingPath);
 }
-function installLua(files, stagingPath, modType) {
+async function installLua(context, files, stagingPath, modType) {
   const folderId = getLuaFolderId(files, stagingPath);
+  const modsPath = await getUe4ssModsPath(context);
   const luaFiles = files.filter((file) => LUA_EXTENSIONS.includes(archiveExtName(file))).sort((a, b) => a.length - b.length);
   const shortestSegments = splitArchivePath(luaFiles[0] || "");
   const modsIndex = shortestSegments.findIndex((segment) => segment.toLowerCase() === "mods");
@@ -500,7 +557,7 @@ function installLua(files, stagingPath, modType) {
     if (!isFileLike(file)) continue;
     const segments = splitArchivePath(file);
     const legacyModsIndex = getLegacyUe4ssModsIndex(segments);
-    const destination = legacyModsIndex >= 0 ? archiveJoin(UE4SS_RUNTIME_PATH, segments.slice(legacyModsIndex).join("/")) : modsIndex >= 0 ? archiveJoin(UE4SS_RUNTIME_PATH, segments.slice(modsIndex).join("/")) : segments.length > 1 ? archiveJoin(UE4SS_RUNTIME_PATH, "Mods", folderId, segments.slice(1).join("/")) : archiveJoin(UE4SS_RUNTIME_PATH, "Mods", folderId, file);
+    const destination = legacyModsIndex >= 0 ? archiveJoin(modsPath, segments.slice(legacyModsIndex + 1).join("/")) : modsIndex >= 0 ? archiveJoin(modsPath, segments.slice(modsIndex + 1).join("/")) : segments.length > 1 ? archiveJoin(modsPath, folderId, segments.slice(1).join("/")) : archiveJoin(modsPath, folderId, file);
     instructions.push({
       type: "copy",
       source: file,
@@ -518,7 +575,7 @@ function installRoot(files) {
   return { instructions };
 }
 
-// extensions/Palworld/src/modTypes.ts
+// src/modTypes.ts
 function isPalworld(gameId) {
   return Number(gameId) === GAME_ID;
 }
@@ -540,19 +597,17 @@ function registerPalworldModTypes(context) {
     return files.some((file) => /(^|[\\/])UnrealPak\.exe$/i.test(file));
   }, { name: "Unreal Pak Tool" });
   context.registerInstaller(MOD_TYPE_UNREAL_PAK_TOOL, 11, testUnrealPakTool, (files) => installUnrealPakTool(files));
+  context.registerModType(MOD_TYPE_ROOT, MOD_TYPE_PRIORITY.root, isPalworld, gameRootTarget, (input) => testRoot(filesFromLocalInfo(input), GAME_ID).supported, { name: "Root Mod" });
+  context.registerInstaller(MOD_TYPE_ROOT, 12, testRoot, (files) => installRoot(files));
   context.registerModType(MOD_TYPE_BLUEPRINT_PAK, MOD_TYPE_PRIORITY.blueprintPak, isPalworld, gameRootTarget, (input) => hasPakFile(filesFromLocalInfo(input)), { name: "Blueprint Mod" });
   context.registerInstaller(MOD_TYPE_BLUEPRINT_PAK, 40, testPak, (files, stagingPath, options) => installPak(context, files, stagingPath, options));
   context.registerModType(MOD_TYPE_LUA_V2, MOD_TYPE_PRIORITY.luaV2, isPalworld, gameRootTarget, (input) => hasLuaFile(filesFromLocalInfo(input)), { name: "LUA Mod V2" });
-  context.registerInstaller(MOD_TYPE_LUA_V2, 14, testLua, (files, stagingPath) => installLua(files, stagingPath, MOD_TYPE_LUA_V2));
+  context.registerInstaller(MOD_TYPE_LUA_V2, 14, testLua, (files, stagingPath) => installLua(context, files, stagingPath, MOD_TYPE_LUA_V2));
   context.registerModType(MOD_TYPE_PAK, MOD_TYPE_PRIORITY.pak, isPalworld, gameRootTarget, (input) => hasPakFile(filesFromLocalInfo(input)), { name: "Pak Mod" });
   context.registerInstaller(MOD_TYPE_PAK, 40, testPak, (files, stagingPath, options) => installPak(context, files, stagingPath, options));
-  context.registerModType(MOD_TYPE_LUA, MOD_TYPE_PRIORITY.lua, isPalworld, gameRootTarget, (input) => hasLuaFile(filesFromLocalInfo(input)), { name: "LUA Mod" });
-  context.registerInstaller(MOD_TYPE_LUA, 14, testLua, (files, stagingPath) => installLua(files, stagingPath, MOD_TYPE_LUA));
-  context.registerModType(MOD_TYPE_ROOT, MOD_TYPE_PRIORITY.root, isPalworld, gameRootTarget, (input) => testRoot(filesFromLocalInfo(input), GAME_ID).supported, { name: "Root Mod" });
-  context.registerInstaller(MOD_TYPE_ROOT, 15, testRoot, (files) => installRoot(files));
 }
 
-// extensions/Palworld/src/index.ts
+// src/index.ts
 async function main(context) {
   context.registerGame({
     id: GAME_ID,

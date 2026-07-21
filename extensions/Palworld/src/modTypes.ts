@@ -2,7 +2,6 @@ import type { IExtensionContext } from 'heybox-mod-api'
 import {
   GAME_ID,
   MOD_TYPE_BLUEPRINT_PAK,
-  MOD_TYPE_LUA,
   MOD_TYPE_LUA_V2,
   MOD_TYPE_PAK,
   MOD_TYPE_PRIORITY,
@@ -51,18 +50,16 @@ export function registerPalworldModTypes(context: IExtensionContext): void {
   }, { name: 'Unreal Pak Tool' })
   context.registerInstaller(MOD_TYPE_UNREAL_PAK_TOOL, 11, testUnrealPakTool, (files) => installUnrealPakTool(files))
 
+  context.registerModType(MOD_TYPE_ROOT, MOD_TYPE_PRIORITY.root, isPalworld, gameRootTarget, (input) => testRoot(filesFromLocalInfo(input), GAME_ID).supported, { name: 'Root Mod' })
+  context.registerInstaller(MOD_TYPE_ROOT, 12, testRoot, (files) => installRoot(files))
+
   context.registerModType(MOD_TYPE_BLUEPRINT_PAK, MOD_TYPE_PRIORITY.blueprintPak, isPalworld, gameRootTarget, (input) => hasPakFile(filesFromLocalInfo(input)), { name: 'Blueprint Mod' })
   context.registerInstaller(MOD_TYPE_BLUEPRINT_PAK, 40, testPak, (files, stagingPath, options) => installPak(context, files, stagingPath, options))
 
   context.registerModType(MOD_TYPE_LUA_V2, MOD_TYPE_PRIORITY.luaV2, isPalworld, gameRootTarget, (input) => hasLuaFile(filesFromLocalInfo(input)), { name: 'LUA Mod V2' })
-  context.registerInstaller(MOD_TYPE_LUA_V2, 14, testLua, (files, stagingPath) => installLua(files, stagingPath, MOD_TYPE_LUA_V2))
+  context.registerInstaller(MOD_TYPE_LUA_V2, 14, testLua, (files, stagingPath) => installLua(context, files, stagingPath, MOD_TYPE_LUA_V2))
 
   context.registerModType(MOD_TYPE_PAK, MOD_TYPE_PRIORITY.pak, isPalworld, gameRootTarget, (input) => hasPakFile(filesFromLocalInfo(input)), { name: 'Pak Mod' })
   context.registerInstaller(MOD_TYPE_PAK, 40, testPak, (files, stagingPath, options) => installPak(context, files, stagingPath, options))
 
-  context.registerModType(MOD_TYPE_LUA, MOD_TYPE_PRIORITY.lua, isPalworld, gameRootTarget, (input) => hasLuaFile(filesFromLocalInfo(input)), { name: 'LUA Mod' })
-  context.registerInstaller(MOD_TYPE_LUA, 14, testLua, (files, stagingPath) => installLua(files, stagingPath, MOD_TYPE_LUA))
-
-  context.registerModType(MOD_TYPE_ROOT, MOD_TYPE_PRIORITY.root, isPalworld, gameRootTarget, (input) => testRoot(filesFromLocalInfo(input), GAME_ID).supported, { name: 'Root Mod' })
-  context.registerInstaller(MOD_TYPE_ROOT, 15, testRoot, (files) => installRoot(files))
 }
