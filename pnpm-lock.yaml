@@ -160,6 +160,15 @@ importers:
         specifier: ^5.7.0
         version: 5.9.3
 
+  extensions/StellarBlade:
+    devDependencies:
+      heybox-mod-api:
+        specifier: 1.9.0
+        version: 1.9.0
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
+
   extensions/WitchsApocalypticJourney:
     devDependencies:
       heybox-mod-api:
