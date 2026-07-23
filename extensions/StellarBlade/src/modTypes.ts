@@ -44,6 +44,29 @@ import {
 
 type Tester = (files: string[], gameId: number | string) => { supported: boolean }
 
+const MUTABLE_UE4SS_FILES = new Set([
+  'sb/binaries/win64/ue4ss/ue4ss-settings.ini',
+  'sb/binaries/win64/ue4ss/mods/mods.txt',
+  'sb/binaries/win64/ue4ss/mods/mods.json',
+])
+
+function normalizeDestination(value: unknown): string {
+  return String(value ?? '').replace(/\\/g, '/').replace(/^\.\//, '').toLowerCase()
+}
+
+export function applyMutableFileVerification(result: any): any {
+  if (!result || !Array.isArray(result.instructions)) return result
+  return {
+    ...result,
+    instructions: result.instructions.map((instruction: any) => {
+      if (!instruction || !MUTABLE_UE4SS_FILES.has(normalizeDestination(instruction.destination))) {
+        return instruction
+      }
+      return { ...instruction, verification: 'exists', conflictPolicy: 'overwrite' }
+    }),
+  }
+}
+
 function isStellarBlade(gameId: number | string): boolean {
   return Number(gameId) === GAME_ID
 }
@@ -70,7 +93,9 @@ function register(
     (input) => test(filesFromLocalInfo(input), GAME_ID).supported,
     { name },
   )
-  context.registerInstaller(typeId, installerPriority, test, install)
+  context.registerInstaller(typeId, installerPriority, test, async (...args: any[]) => (
+    applyMutableFileVerification(await install(...args))
+  ))
 }
 
 export function registerStellarBladeModTypes(context: IExtensionContext): void {

@@ -20,7 +20,7 @@ import {
   testUe4ss,
   testUe4ssCombo,
 } from '../src/installers'
-import { registerStellarBladeModTypes } from '../src/modTypes'
+import { applyMutableFileVerification, registerStellarBladeModTypes } from '../src/modTypes'
 import { getRequirementItems, getRequirementStatus } from '../src/requirements'
 
 function requirementContext(existingFiles: string[]) {
@@ -89,6 +89,55 @@ async function main() {
     { type: 'copy', source: 'UE4SS-v1/ue4ss/UE4SS.dll', destination: 'SB/Binaries/Win64/ue4ss/UE4SS.dll' },
     { type: 'copy', source: 'UE4SS-v1/ue4ss/Mods/shared.txt', destination: 'SB/Binaries/Win64/ue4ss/Mods/shared.txt' },
     { type: 'copy', source: 'UE4SS-v1/ue4ss/LICENSE', destination: 'SB/Binaries/Win64/ue4ss/LICENSE' },
+  ])
+
+  const verifiedUe4ss = applyMutableFileVerification(installUe4ss([
+    'UE4SS-v1/dwmapi.dll',
+    'UE4SS-v1/ue4ss/UE4SS.dll',
+    'UE4SS-v1/ue4ss/UE4SS-settings.ini',
+    'UE4SS-v1/ue4ss/Mods/mods.txt',
+    'UE4SS-v1/ue4ss/Mods/mods.json',
+    'UE4SS-v1/ue4ss/Mods/Nested/mods.txt',
+    'UE4SS-v1/ue4ss/Mods/enabled.txt',
+    'UE4SS-v1/ue4ss/Mods/UE4SS-settings.ini',
+  ]))
+  assert.deepEqual(verifiedUe4ss.instructions.slice(2), [
+    {
+      type: 'copy',
+      source: 'UE4SS-v1/ue4ss/UE4SS-settings.ini',
+      destination: 'SB/Binaries/Win64/ue4ss/UE4SS-settings.ini',
+      verification: 'exists',
+      conflictPolicy: 'overwrite',
+    },
+    {
+      type: 'copy',
+      source: 'UE4SS-v1/ue4ss/Mods/mods.txt',
+      destination: 'SB/Binaries/Win64/ue4ss/Mods/mods.txt',
+      verification: 'exists',
+      conflictPolicy: 'overwrite',
+    },
+    {
+      type: 'copy',
+      source: 'UE4SS-v1/ue4ss/Mods/mods.json',
+      destination: 'SB/Binaries/Win64/ue4ss/Mods/mods.json',
+      verification: 'exists',
+      conflictPolicy: 'overwrite',
+    },
+    {
+      type: 'copy',
+      source: 'UE4SS-v1/ue4ss/Mods/Nested/mods.txt',
+      destination: 'SB/Binaries/Win64/ue4ss/Mods/Nested/mods.txt',
+    },
+    {
+      type: 'copy',
+      source: 'UE4SS-v1/ue4ss/Mods/enabled.txt',
+      destination: 'SB/Binaries/Win64/ue4ss/Mods/enabled.txt',
+    },
+    {
+      type: 'copy',
+      source: 'UE4SS-v1/ue4ss/Mods/UE4SS-settings.ini',
+      destination: 'SB/Binaries/Win64/ue4ss/Mods/UE4SS-settings.ini',
+    },
   ])
 
   const gamePath = path.join('D:', 'Games', 'StellarBlade')

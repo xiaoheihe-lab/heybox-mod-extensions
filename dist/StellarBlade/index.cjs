@@ -300,6 +300,26 @@ function installBinaries(files) {
 }
 
 // src/modTypes.ts
+var MUTABLE_UE4SS_FILES = /* @__PURE__ */ new Set([
+  "sb/binaries/win64/ue4ss/ue4ss-settings.ini",
+  "sb/binaries/win64/ue4ss/mods/mods.txt",
+  "sb/binaries/win64/ue4ss/mods/mods.json"
+]);
+function normalizeDestination(value) {
+  return String(value ?? "").replace(/\\/g, "/").replace(/^\.\//, "").toLowerCase();
+}
+function applyMutableFileVerification(result2) {
+  if (!result2 || !Array.isArray(result2.instructions)) return result2;
+  return {
+    ...result2,
+    instructions: result2.instructions.map((instruction) => {
+      if (!instruction || !MUTABLE_UE4SS_FILES.has(normalizeDestination(instruction.destination))) {
+        return instruction;
+      }
+      return { ...instruction, verification: "exists", conflictPolicy: "overwrite" };
+    })
+  };
+}
 function isStellarBlade(gameId) {
   return Number(gameId) === GAME_ID;
 }
@@ -316,7 +336,7 @@ function register(context, typeId, priority, name, installerPriority, test, inst
     (input) => test(filesFromLocalInfo(input), GAME_ID).supported,
     { name }
   );
-  context.registerInstaller(typeId, installerPriority, test, install);
+  context.registerInstaller(typeId, installerPriority, test, async (...args) => applyMutableFileVerification(await install(...args)));
 }
 function registerStellarBladeModTypes(context) {
   register(context, MOD_TYPE_UE4SS, MOD_TYPE_PRIORITY.ue4ss, "UE4SS for Stellar Blade", 1, testUe4ss, installUe4ss);
