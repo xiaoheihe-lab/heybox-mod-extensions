@@ -23,14 +23,20 @@ export function extraDestination(input: InstallerInput, file: PackageFile): stri
   return `${PATHS.extras}/${input.pkg.packageName}/${file.path}`
 }
 
+export function findUnsafeUnmappedFiles(
+  input: InstallerInput,
+  mapped: ReadonlyMap<string, InstallInstruction>,
+): PackageFile[] {
+  return input.pkg.files.filter((file) => !mapped.has(file.source) && !EXTRA_FILE_EXTENSIONS.has(extname(file.path)))
+}
+
 export async function finalizeMappedInstall(
   input: InstallerInput,
   modTypeId: CyberpunkModType,
   mapped: Map<string, InstallInstruction>,
   attributes: InstallInstruction[] = [],
 ): Promise<CyberpunkInstallResult> {
-  const remaining = input.pkg.files.filter((file) => !mapped.has(file.source))
-  const unsafeRemaining = remaining.filter((file) => !EXTRA_FILE_EXTENSIONS.has(extname(file.path)))
+  const unsafeRemaining = findUnsafeUnmappedFiles(input, mapped)
 
   if (unsafeRemaining.length > 0) {
     return installFallback(

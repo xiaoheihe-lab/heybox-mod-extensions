@@ -17,7 +17,7 @@ import {
   mapTweakXLFiles,
 } from './gameplay'
 import { hasRedmod, mapRedmods } from './redmod'
-import { finalizeMappedInstall } from './shared'
+import { finalizeMappedInstall, findUnsafeUnmappedFiles } from './shared'
 
 function detectedKinds(input: InstallerInput): string[] {
   const files = input.pkg.files
@@ -53,20 +53,30 @@ export const multiTypeCandidate: Candidate = {
     if (kinds.includes('tweak-xl')) mapTweakXLFiles(input.pkg.files, mapped)
 
     let protectedConfig = false
+    let unresolvedConfig = false
     if (kinds.includes('json')) {
       const state = mapJsonConfig(input.pkg.files, mapped)
-      if (state.unresolved) throw new Error('Multi-type Mod 中包含无法确定目标路径的 options.json。')
+      unresolvedConfig ||= state.unresolved
       protectedConfig ||= state.protected
     }
     if (kinds.includes('xml')) {
       protectedConfig ||= mapXmlConfig(input.pkg.files, mapped).protected
     }
-    if (protectedConfig) {
-      await confirmInstall(input.context, '安装受保护的游戏配置', '该 Multi-type Mod 会覆盖 Cyberpunk 2077 的 JSON/XML 核心配置。')
-    }
-
     if (kinds.includes('redmod')) {
       attributes.push(...await mapRedmods(input, mapped, true))
+    }
+
+    if (unresolvedConfig || findUnsafeUnmappedFiles(input, mapped).length > 0) {
+      return finalizeMappedInstall(
+        input,
+        kinds.includes('redmod') ? MOD_TYPE.multiTypeRedmod : MOD_TYPE.multiType,
+        mapped,
+        attributes,
+      )
+    }
+
+    if (protectedConfig) {
+      await confirmInstall(input.context, '安装受保护的游戏配置', '该 Multi-type Mod 会覆盖 Cyberpunk 2077 的 JSON/XML 核心配置。')
     }
 
     return finalizeMappedInstall(

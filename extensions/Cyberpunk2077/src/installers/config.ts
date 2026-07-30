@@ -2,7 +2,13 @@ import { JSON_CANONICAL_PATHS, MOD_TYPE, PATHS, XML_PROTECTED_NAMES } from '../c
 import { basename, dirname, extname, isUnder } from '../package'
 import { confirmInstall } from '../ui'
 import type { Candidate, InstallInstruction, InstallerInput, PackageFile } from '../types'
-import { finalizeMappedInstall, installFallback, mapInstruction, readText } from './shared'
+import {
+  finalizeMappedInstall,
+  findUnsafeUnmappedFiles,
+  installFallback,
+  mapInstruction,
+  readText,
+} from './shared'
 
 const JSON_PROTECTED_PATHS = new Set([
   ...Object.values(JSON_CANONICAL_PATHS).map((path) => path.toLowerCase()),
@@ -10,13 +16,12 @@ const JSON_PROTECTED_PATHS = new Set([
   'r6/config/settings/platform/pc/options.json',
 ])
 
-function isProtectedJson(file: PackageFile): boolean {
-  return JSON_PROTECTED_PATHS.has(file.lower)
-    || ((isUnder(file, 'engine/config') || isUnder(file, 'r6/config')) && extname(file.path) === '.json')
+function isJsonInProtectedTree(file: PackageFile): boolean {
+  return (isUnder(file, 'engine/config') || isUnder(file, 'r6/config')) && extname(file.path) === '.json'
 }
 
 export function hasJsonConfig(files: PackageFile[], canonicalOnly = false): boolean {
-  if (files.some(isProtectedJson)) return true
+  if (files.some((file) => JSON_PROTECTED_PATHS.has(file.lower) || isJsonInProtectedTree(file))) return true
   if (canonicalOnly) return false
   return files.some((file) => !file.path.includes('/')
     && [...Object.keys(JSON_CANONICAL_PATHS), 'options.json'].includes(basename(file.lower)))
@@ -26,7 +31,7 @@ export function mapJsonConfig(files: PackageFile[], mapped: Map<string, InstallI
   let protectedFiles = false
   let unresolved = false
   for (const file of files) {
-    if (isProtectedJson(file)) {
+    if (JSON_PROTECTED_PATHS.has(file.lower)) {
       protectedFiles = true
       mapInstruction(mapped, file)
       continue
@@ -95,8 +100,12 @@ const jsonConfig: Candidate = {
   install: async (input) => {
     const mapped = new Map<string, InstallInstruction>()
     const state = mapJsonConfig(input.pkg.files, mapped)
-    if (state.unresolved || mapped.size === 0) {
+    if (state.unresolved) {
       return installFallback(input, '顶层 options.json 无法可靠判断属于 r6/config/settings 还是 platform/pc。')
+    }
+    if (mapped.size === 0) return finalizeMappedInstall(input, MOD_TYPE.jsonConfig, mapped)
+    if (findUnsafeUnmappedFiles(input, mapped).length > 0) {
+      return finalizeMappedInstall(input, MOD_TYPE.jsonConfig, mapped)
     }
     if (state.protected) {
       await confirmInstall(input.context, '安装受保护的 JSON 配置', '该 Mod 会覆盖 Cyberpunk 2077 的核心 JSON 配置文件。请确认其与当前游戏版本兼容。')
@@ -112,6 +121,9 @@ const xmlConfig: Candidate = {
   install: async (input) => {
     const mapped = new Map<string, InstallInstruction>()
     const state = mapXmlConfig(input.pkg.files, mapped)
+    if (findUnsafeUnmappedFiles(input, mapped).length > 0) {
+      return finalizeMappedInstall(input, MOD_TYPE.xmlConfig, mapped)
+    }
     if (state.protected) {
       await confirmInstall(input.context, '安装受保护的 XML 配置', '该 Mod 会覆盖 inputContexts、inputUserMappings 等输入配置。请确认其与当前游戏版本及其他输入 Mod 兼容。')
     }

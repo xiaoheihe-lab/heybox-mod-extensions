@@ -1,6 +1,14 @@
 import path from 'node:path'
 
-export function fakeContext(fileContents: Record<string, string> = {}, existingFiles: string[] = []) {
+export interface FakeContextOptions {
+  requestResponse?: unknown
+}
+
+export function fakeContext(
+  fileContents: Record<string, string> = {},
+  existingFiles: string[] = [],
+  options: FakeContextOptions = {},
+) {
   const normalizedContents = new Map(
     Object.entries(fileContents).map(([key, value]) => [key.replace(/\\/g, '/').toLowerCase(), value]),
   )
@@ -8,8 +16,15 @@ export function fakeContext(fileContents: Record<string, string> = {}, existingF
   const requests: any[] = []
   const notifications: any[] = []
 
+  const readFile = async (file: string) => {
+    const key = file.replace(/\\/g, '/').toLowerCase()
+    if (!normalizedContents.has(key)) throw new Error(`ENOENT: ${key}`)
+    return normalizedContents.get(key)
+  }
+
   const context = {
     api: {
+      loadOrder: { deploy: async () => ({}) },
       util: {
         path,
         GameStoreHelper: { findByAppId: async () => ({ gamePath: 'D:/Games/Cyberpunk 2077' }) },
@@ -19,16 +34,13 @@ export function fakeContext(fileContents: Record<string, string> = {}, existingF
             if (!existing.has(key)) throw new Error('ENOENT')
             return { isFile: true }
           },
-          readFile: async (file: string) => {
-            const key = file.replace(/\\/g, '/').toLowerCase()
-            if (!normalizedContents.has(key)) throw new Error(`ENOENT: ${key}`)
-            return normalizedContents.get(key)
-          },
+          readFile,
+          readFileAsync: readFile,
         },
         ui: {
           request: async (payload: any) => {
             requests.push(payload)
-            return { confirmed: true, requestId: 'test', action: 'confirm' }
+            return options.requestResponse ?? { confirmed: true, requestId: 'test', action: 'confirm' }
           },
           notify: (payload: any) => notifications.push(payload),
         },
@@ -37,6 +49,9 @@ export function fakeContext(fileContents: Record<string, string> = {}, existingF
     registerGame: () => undefined,
     registerModType: () => undefined,
     registerInstaller: () => undefined,
+    registerAttributeExtractor: () => undefined,
+    registerPostInstallerAttributeExtractor: () => undefined,
+    registerLoadOrder: () => undefined,
     registerExtensionAction: () => undefined,
   } as any
 

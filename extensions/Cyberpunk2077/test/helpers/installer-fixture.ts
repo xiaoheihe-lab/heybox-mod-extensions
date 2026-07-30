@@ -20,6 +20,22 @@ export interface InstallerFixture {
   expectedModType: CyberpunkModType
   expectedCopies: ExpectedCopy[]
   expectedPromptCount?: number
+  expectedPromptTitles?: string[]
+}
+
+export interface InstallerFailureFixture {
+  name: string
+  files: string[]
+  expectedError: RegExp
+  expectedNotificationTitle: string
+}
+
+export interface InstallerCancellationFixture {
+  name: string
+  files: string[]
+  fileContents?: Record<string, string>
+  expectedError: RegExp
+  expectedPromptTitle: string
 }
 
 function slash(value: string): string {
@@ -64,11 +80,48 @@ export async function assertInstallerFixture(fixture: InstallerFixture): Promise
 
   assert.equal(result.modTypeId, fixture.expectedModType)
   assert.deepEqual(sortedCopies(copies), sortedCopies(fixture.expectedCopies))
-  assert.equal(requests.length, fixture.expectedPromptCount ?? 0)
+  const expectedPromptCount = fixture.expectedPromptTitles?.length ?? fixture.expectedPromptCount ?? 0
+  assert.equal(requests.length, expectedPromptCount)
+  if (fixture.expectedPromptTitles) {
+    assert.deepEqual(requests.map((request) => request.title), fixture.expectedPromptTitles)
+  }
 
   const archiveSources = new Set(fixture.files.map((file) => slash(file).replace(/^\.\//, '')))
   for (const copy of copies) {
     assert.ok(archiveSources.has(slash(copy.source)), `copy source must refer to an archive-relative file: ${copy.source}`)
     assertSafeGameRelativeDestination(copy.destination)
   }
+}
+
+export async function assertInstallerFailureFixture(fixture: InstallerFailureFixture): Promise<void> {
+  const { context, notifications, requests } = fakeContext()
+
+  await assert.rejects(
+    installCyberpunkPackage(context, fixture.files, TEST_STAGING_PATH),
+    fixture.expectedError,
+  )
+  assert.equal(requests.length, 0, 'a blocked package must not enter the fallback confirmation flow')
+  assert.equal(notifications.length, 1, 'a blocked package must emit exactly one safety notification')
+  assert.equal(notifications[0].title, fixture.expectedNotificationTitle)
+  assert.equal(notifications[0].variant, 'error')
+}
+
+export async function assertInstallerCancellationFixture(fixture: InstallerCancellationFixture): Promise<void> {
+  const stagedContents = Object.fromEntries(
+    Object.entries(fixture.fileContents ?? {}).map(([source, content]) => [
+      path.join(TEST_STAGING_PATH, slash(source)),
+      content,
+    ]),
+  )
+  const { context, notifications, requests } = fakeContext(stagedContents, [], {
+    requestResponse: { confirmed: false, requestId: 'test', action: 'cancel' },
+  })
+
+  await assert.rejects(
+    installCyberpunkPackage(context, fixture.files, TEST_STAGING_PATH),
+    fixture.expectedError,
+  )
+  assert.equal(requests.length, 1)
+  assert.equal(requests[0].title, fixture.expectedPromptTitle)
+  assert.equal(notifications.length, 0)
 }

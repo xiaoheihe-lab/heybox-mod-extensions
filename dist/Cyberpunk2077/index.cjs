@@ -184,15 +184,81 @@ function notify(context, title, content, variant = "warning") {
   });
 }
 
-// src/redmodDeployment.ts
+// src/loadOrder/deployer.ts
 var import_fs = __toESM(require("fs"));
-var import_path = __toESM(require("path"));
+var import_path2 = __toESM(require("path"));
 var import_child_process = require("child_process");
+
+// src/loadOrder/provider.ts
+var import_path = __toESM(require("path"));
+var REDMOD_LOAD_ORDER_PROVIDER_ID = "redmod";
+function isRedmodLoadOrderModRelevant(mod) {
+  return Array.isArray(mod.metaInfo?.cyberpunkRedmodInfo) && mod.metaInfo.cyberpunkRedmodInfo.length > 0;
+}
+function normalizeRelativePath(value) {
+  return String(value || "").replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
+}
+function createRedmodEntryId(modKey, relativePath) {
+  return `${modKey}:${normalizeRelativePath(relativePath).toLowerCase()}`;
+}
+function getRedmodMetadata(context) {
+  const entries = [];
+  const seen = /* @__PURE__ */ new Set();
+  for (const mod of context.mods) {
+    const values = mod.metaInfo?.cyberpunkRedmodInfo;
+    if (!Array.isArray(values)) continue;
+    for (const value of values) {
+      if (!value || typeof value !== "object") continue;
+      const raw = value;
+      const name = String(raw.name || "").trim();
+      const version = String(raw.version || "").trim();
+      const relativePath = normalizeRelativePath(raw.relativePath);
+      if (!name || !version || !/^mods\/[^/]+$/i.test(relativePath)) continue;
+      const id = createRedmodEntryId(mod.modKey, relativePath);
+      if (seen.has(id)) continue;
+      seen.add(id);
+      const sourceName = String(mod.metaInfo?.name || mod.metaInfo?.title || mod.modKey);
+      entries.push({
+        id,
+        ownerModKey: mod.modKey,
+        name: `${name} ${version}\uFF08\u6765\u81EA ${sourceName}\uFF09`,
+        enabled: mod.enabled,
+        data: { name, version, relativePath, sourceModKey: mod.modKey }
+      });
+    }
+  }
+  return entries;
+}
+function deserializeRedmodLoadOrder(context) {
+  const entries = getRedmodMetadata(context);
+  const savedIndex = new Map(context.savedOrder.map((id, index) => [id, index]));
+  const newIndex = context.savedOrder.length;
+  return entries.sort((left, right) => {
+    const leftIndex = savedIndex.get(left.id) ?? newIndex;
+    const rightIndex = savedIndex.get(right.id) ?? newIndex;
+    if (leftIndex !== rightIndex) return leftIndex - rightIndex;
+    const leftPath = import_path.default.basename(String(left.data.relativePath || ""));
+    const rightPath = import_path.default.basename(String(right.data.relativePath || ""));
+    const pathOrder = leftPath < rightPath ? -1 : leftPath > rightPath ? 1 : 0;
+    return pathOrder || (left.id < right.id ? -1 : left.id > right.id ? 1 : 0);
+  });
+}
+function getEnabledRedmodNames(entries) {
+  return entries.filter((entry) => entry.enabled).map((entry) => import_path.default.basename(String(entry.data?.relativePath || ""))).filter(Boolean);
+}
+
+// src/loadOrder/deployer.ts
 var V2077_DIR = "V2077";
-var LOAD_ORDER_DIR = import_path.default.join(V2077_DIR, "Load Order");
-var MODLIST_PATH = import_path.default.join(V2077_DIR, "modlist.txt");
-var LOAD_ORDER_PATH = import_path.default.join(LOAD_ORDER_DIR, "heybox-managed.json");
-var deploymentQueue = Promise.resolve();
+var LOAD_ORDER_DIR = import_path2.default.join(V2077_DIR, "Load Order");
+var MODLIST_PATH = import_path2.default.join(V2077_DIR, "modlist.txt");
+var LOAD_ORDER_PATH = import_path2.default.join(LOAD_ORDER_DIR, "heybox-managed.json");
+var RedmodDeploymentError = class extends Error {
+  constructor(code, message) {
+    super(message);
+    this.code = code;
+    this.name = "RedmodDeploymentError";
+  }
+};
 async function fileExists(filePath) {
   try {
     return (await import_fs.default.promises.stat(filePath)).isFile();
@@ -201,8 +267,8 @@ async function fileExists(filePath) {
   }
 }
 async function atomicWrite(filePath, data) {
-  await import_fs.default.promises.mkdir(import_path.default.dirname(filePath), { recursive: true });
-  const temporaryPath = `${filePath}.${Date.now()}.tmp`;
+  await import_fs.default.promises.mkdir(import_path2.default.dirname(filePath), { recursive: true });
+  const temporaryPath = `${filePath}.${process.pid}.${Date.now()}.tmp`;
   try {
     await import_fs.default.promises.writeFile(temporaryPath, data, "utf8");
     await import_fs.default.promises.rename(temporaryPath, filePath);
@@ -214,97 +280,465 @@ async function atomicWrite(filePath, data) {
     throw error;
   }
 }
-function collectEnabledRedmods(entries) {
-  const seenMods = /* @__PURE__ */ new Set();
-  const seenPaths = /* @__PURE__ */ new Set();
-  const result = [];
-  for (const entry of entries) {
-    const modKey = String(entry.modKey || "");
-    if (!modKey || seenMods.has(modKey)) continue;
-    seenMods.add(modKey);
-    const values = entry.metaInfo?.cyberpunkRedmodInfo;
-    if (!Array.isArray(values)) continue;
-    for (const value of values) {
-      if (!value || typeof value !== "object") continue;
-      const metadata = value;
-      const relativePath = String(metadata.relativePath || "").replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
-      if (!relativePath || seenPaths.has(relativePath.toLowerCase())) continue;
-      seenPaths.add(relativePath.toLowerCase());
-      result.push({ ...metadata, relativePath });
-    }
-  }
-  return result;
-}
-function runRedmod(executable, gamePath, modlistPath) {
-  const metadataPath = import_path.default.join(gamePath, REDMOD_METADATA);
-  const args = [
+function buildRedmodDeployArgs(gamePath, modlistPath) {
+  return [
     "deploy",
     "-force",
     `-root=${gamePath}`,
-    `-rttiSchemaFile=${metadataPath}`,
+    `-rttiSchemaFile=${import_path2.default.join(gamePath, REDMOD_METADATA)}`,
     `-modlist=${modlistPath}`
   ];
+}
+function runRedmod(executable, gamePath, modlistPath) {
   return new Promise((resolve, reject) => {
-    (0, import_child_process.execFile)(executable, args, { cwd: import_path.default.dirname(executable), windowsHide: true }, (error, _stdout, stderr) => {
-      if (!error) {
-        resolve();
-        return;
+    (0, import_child_process.execFile)(
+      executable,
+      buildRedmodDeployArgs(gamePath, modlistPath),
+      { cwd: import_path2.default.dirname(executable), windowsHide: true },
+      (error, _stdout, stderr) => {
+        if (!error) return resolve();
+        const details = String(stderr || "").trim();
+        reject(new RedmodDeploymentError(
+          "REDMOD_DEPLOY_FAILED",
+          details ? `${error.message}: ${details}` : error.message
+        ));
       }
-      const details = String(stderr || "").trim();
-      reject(new Error(details ? `${error.message}: ${details}` : error.message));
-    });
+    );
   });
 }
-async function deployFromSnapshot(context, snapshot) {
-  const gamePath = String(snapshot.gamePath || "");
-  if (!gamePath) throw new Error("\u672A\u627E\u5230 Cyberpunk 2077 \u6E38\u620F\u76EE\u5F55\u3002");
-  const executable = import_path.default.join(gamePath, REDMOD_DEPLOY_EXE);
-  const metadata = import_path.default.join(gamePath, REDMOD_METADATA);
-  if (!await fileExists(executable) || !await fileExists(metadata)) {
-    notify(context, "\u65E0\u6CD5\u81EA\u52A8\u90E8\u7F72 REDmod", "Steam REDmod DLC \u672A\u5B89\u88C5\u6216\u4E0D\u5B8C\u6574\uFF1BMod \u6587\u4EF6\u5DF2\u90E8\u7F72\uFF0C\u4F46\u5C1A\u672A\u8FD0\u884C redMod.exe\u3002", "error");
-    return;
-  }
-  const enabledRedmods = collectEnabledRedmods(Array.isArray(snapshot.entries) ? snapshot.entries : []);
-  const modNames = enabledRedmods.map((item) => import_path.default.basename(String(item.relativePath || ""))).filter(Boolean);
-  const modlistPath = import_path.default.join(gamePath, MODLIST_PATH);
-  const loadOrderPath = import_path.default.join(gamePath, LOAD_ORDER_PATH);
-  await atomicWrite(modlistPath, modNames.join("\r\n"));
-  await atomicWrite(loadOrderPath, `${JSON.stringify({ generatedAt: (/* @__PURE__ */ new Date()).toISOString(), mods: enabledRedmods }, null, 2)}
+var defaultDependencies = { fileExists, atomicWrite, runRedmod };
+async function serializeAndDeployRedmods(entries, context, dependencies = defaultDependencies) {
+  const gamePath = String(context.gamePath || "");
+  if (!gamePath) throw new RedmodDeploymentError("REDMOD_GAME_PATH_MISSING", "\u672A\u627E\u5230 Cyberpunk 2077 \u6E38\u620F\u76EE\u5F55\u3002");
+  const executable = import_path2.default.join(gamePath, REDMOD_DEPLOY_EXE);
+  const metadataPath = import_path2.default.join(gamePath, REDMOD_METADATA);
+  const modlistPath = import_path2.default.join(gamePath, MODLIST_PATH);
+  const loadOrderPath = import_path2.default.join(gamePath, LOAD_ORDER_PATH);
+  const diagnostic = {
+    schemaVersion: 1,
+    providerId: REDMOD_LOAD_ORDER_PROVIDER_ID,
+    revision: context.revision,
+    generatedAt: (/* @__PURE__ */ new Date()).toISOString(),
+    entries
+  };
+  await dependencies.atomicWrite(modlistPath, getEnabledRedmodNames(entries).join("\r\n"));
+  await dependencies.atomicWrite(loadOrderPath, `${JSON.stringify(diagnostic, null, 2)}
 `);
-  await runRedmod(executable, gamePath, modlistPath);
-  notify(
-    context,
-    "REDmod \u90E8\u7F72\u5B8C\u6210",
-    enabledRedmods.length > 0 ? `\u5DF2\u6309\u5F53\u524D\u542F\u7528\u987A\u5E8F\u90E8\u7F72 ${enabledRedmods.length} \u4E2A REDmod\u3002` : "\u5F53\u524D\u6CA1\u6709\u542F\u7528\u7684 REDmod\uFF0C\u5DF2\u5237\u65B0\u9ED8\u8BA4 REDmod \u90E8\u7F72\u3002",
-    "success"
-  );
-}
-async function deployEnabledRedmods(context) {
-  deploymentQueue = deploymentQueue.catch(() => void 0).then(async () => {
-    await context.api.vfs.runManagedDeploymentMutation({}, async (snapshot) => {
-      await deployFromSnapshot(context, snapshot);
-    });
-  });
-  return deploymentQueue.catch((error) => {
-    notify(context, "REDmod \u90E8\u7F72\u5931\u8D25", String(error?.message || error), "error");
-    throw error;
-  });
+  if (!await dependencies.fileExists(executable) || !await dependencies.fileExists(metadataPath)) {
+    throw new RedmodDeploymentError(
+      "REDMOD_TOOL_MISSING",
+      "Steam REDmod DLC \u672A\u5B89\u88C5\u6216\u4E0D\u5B8C\u6574\uFF1BLoad Order \u5DF2\u4FDD\u5B58\uFF0C\u4F46\u5C1A\u672A\u8FD0\u884C redMod.exe\u3002"
+    );
+  }
+  await dependencies.runRedmod(executable, gamePath, modlistPath);
 }
 async function prepareRedmodDirectories(gamePath) {
   if (!gamePath) return;
   await Promise.all([
-    import_fs.default.promises.mkdir(import_path.default.join(gamePath, "mods"), { recursive: true }),
-    import_fs.default.promises.mkdir(import_path.default.join(gamePath, "r6/cache/modded"), { recursive: true }),
-    import_fs.default.promises.mkdir(import_path.default.join(gamePath, LOAD_ORDER_DIR), { recursive: true })
+    import_fs.default.promises.mkdir(import_path2.default.join(gamePath, "mods"), { recursive: true }),
+    import_fs.default.promises.mkdir(import_path2.default.join(gamePath, "r6/cache/modded"), { recursive: true }),
+    import_fs.default.promises.mkdir(import_path2.default.join(gamePath, LOAD_ORDER_DIR), { recursive: true })
   ]);
 }
-function registerRedmodDeployment(context) {
-  for (const modType of [MOD_TYPE.redmod, MOD_TYPE.multiTypeRedmod]) {
-    for (const phase of ["afterEnable", "afterDisable", "afterUninstall"]) {
-      context.registerManagedDeploymentHook(phase, { modType }, () => deployEnabledRedmods(context));
+
+// src/redmod/attributes.ts
+var import_fs2 = __toESM(require("fs"));
+var import_path3 = __toESM(require("path"));
+
+// src/package.ts
+function normalizeRelativePath2(value) {
+  const normalized = String(value ?? "").replace(/\\/g, "/").replace(/^\.\//, "").replace(/^\/+/, "").replace(/\/{2,}/g, "/").replace(/\/$/, "");
+  if (!normalized) return "";
+  const segments = normalized.split("/");
+  if (segments.includes("..") || /^[A-Za-z]:/.test(normalized)) {
+    throw new Error(`Unsafe archive path: ${value}`);
+  }
+  return normalized;
+}
+function sanitizePackageName(value) {
+  const cleaned = String(value ?? "").replace(/[<>:"/\\|?*\x00-\x1F]/g, " ").replace(/\s+/g, " ").trim().replace(/[. ]+$/, "");
+  return cleaned || "Cyberpunk2077Mod";
+}
+function commonWrapper(paths) {
+  if (paths.length === 0) return void 0;
+  const first2 = paths[0].split("/")[0];
+  if (!first2 || paths.some((file) => file.split("/")[0].toLowerCase() !== first2.toLowerCase())) return void 0;
+  if (KNOWN_TOP_LEVEL_DIRS.has(first2.toLowerCase())) return void 0;
+  const unwrapped = paths.map((file) => file.slice(first2.length + 1)).filter(Boolean);
+  if (unwrapped.length !== paths.length) return void 0;
+  const revealsKnownRoot = unwrapped.some((file) => KNOWN_TOP_LEVEL_DIRS.has(file.split("/")[0].toLowerCase()));
+  return revealsKnownRoot ? first2 : void 0;
+}
+function preparePackage(inputFiles) {
+  const normalized = inputFiles.map(normalizeRelativePath2).filter(Boolean);
+  const wrapper = commonWrapper(normalized);
+  const files = normalized.map((source) => {
+    const path4 = wrapper ? source.slice(wrapper.length + 1) : source;
+    return { source, path: path4, lower: path4.toLowerCase() };
+  });
+  const fallbackName = files.find((file) => file.path.includes("/"))?.path.split("/")[0] || files[0]?.path.replace(/\.[^.]+$/, "") || "Cyberpunk2077Mod";
+  return {
+    files,
+    wrapper,
+    packageName: sanitizePackageName(wrapper || fallbackName)
+  };
+}
+function extname(filePath) {
+  const name = filePath.split("/").pop() || "";
+  const dot = name.lastIndexOf(".");
+  return dot > 0 ? name.slice(dot).toLowerCase() : "";
+}
+function basename(filePath) {
+  return filePath.split("/").pop() || "";
+}
+function dirname(filePath) {
+  const index = filePath.lastIndexOf("/");
+  return index < 0 ? "" : filePath.slice(0, index);
+}
+function isUnder(file, prefix) {
+  const normalized = normalizeRelativePath2(prefix).toLowerCase();
+  return file.lower === normalized || file.lower.startsWith(`${normalized}/`);
+}
+function relativeTo(file, prefix) {
+  const normalized = normalizeRelativePath2(prefix);
+  return file.path.slice(normalized.length).replace(/^\//, "");
+}
+function hasPath(files, expected) {
+  const lower = normalizeRelativePath2(expected).toLowerCase();
+  return files.some((file) => file.lower === lower);
+}
+function hasAllPaths(files, expected) {
+  return expected.every((path4) => hasPath(files, path4));
+}
+
+// src/redmod/metadata.ts
+var SCRIPT_DIRS = /* @__PURE__ */ new Set(["core", "cyberpunk", "exec", "samples", "tests"]);
+var TWEAK_DIRS = ["base/gameplay/static_data", "ep1/gameplay/static_data"];
+function hasRedmodInfo(files, canonicalOnly = false) {
+  return files.some((file) => {
+    if (canonicalOnly) return /^mods\/[^/]+\/info\.json$/i.test(file.path);
+    return file.lower === "info.json" || /^mods\/[^/]+\/info\.json$/i.test(file.path) || /^[^/]+\/info\.json$/i.test(file.path);
+  });
+}
+async function decodeInfo(file, readText2) {
+  let value;
+  try {
+    value = JSON.parse(await readText2(file));
+  } catch (error) {
+    throw new Error(`REDmod info.json \u65E0\u6CD5\u89E3\u6790\uFF1A${file.path} (${String(error)})`);
+  }
+  const info = value;
+  if (!info || typeof info.name !== "string" || !info.name.trim() || typeof info.version !== "string" || !info.version.trim()) {
+    throw new Error(`REDmod info.json \u7F3A\u5C11\u6709\u6548\u7684 name/version\uFF1A${file.path}`);
+  }
+  return info;
+}
+async function findRedmodRoots(pkg, readText2, canonicalOnly = false) {
+  const roots = [];
+  for (const file of pkg.files) {
+    let sourceRoot = null;
+    let destinationRoot = null;
+    const canonical = file.path.match(/^mods\/([^/]+)\/info\.json$/i);
+    const named = file.path.match(/^([^/]+)\/info\.json$/i);
+    if (canonical) {
+      sourceRoot = `mods/${canonical[1]}`;
+      destinationRoot = sourceRoot;
+    } else if (!canonicalOnly && file.lower === "info.json") {
+      sourceRoot = "";
+    } else if (!canonicalOnly && named) {
+      sourceRoot = named[1];
+      destinationRoot = `mods/${named[1]}`;
+    }
+    if (sourceRoot === null) continue;
+    const info = await decodeInfo(file, readText2);
+    destinationRoot ||= `mods/${sanitizePackageName(info.name || pkg.packageName)}`;
+    roots.push({ infoFile: file, sourceRoot, destinationRoot, info });
+  }
+  return roots;
+}
+function relativeFromRedmodRoot(file, root) {
+  if (!root) return file.path;
+  if (file.path.toLowerCase() === root.toLowerCase()) return "";
+  if (!file.path.toLowerCase().startsWith(`${root.toLowerCase()}/`)) return null;
+  return file.path.slice(root.length + 1);
+}
+function isValidRedmodFile(relativePath) {
+  const lower = relativePath.toLowerCase();
+  if (lower === "info.json") return true;
+  const segments = lower.split("/");
+  if (segments[0] === "archives") return [".archive", ".xl"].includes(extname(lower));
+  if (segments[0] === "customsounds") return extname(lower) === ".wav";
+  if (segments[0] === "scripts") {
+    return segments.length >= 3 && SCRIPT_DIRS.has(segments[1]) && [".script", ".ws"].includes(extname(lower));
+  }
+  if (segments[0] === "tweaks") {
+    return TWEAK_DIRS.includes(segments.slice(1, -1).join("/")) && extname(lower) === ".tweak";
+  }
+  return false;
+}
+function validateRedmodRoot(pkg, root) {
+  const scopedFiles = pkg.files.filter((file) => relativeFromRedmodRoot(file, root.sourceRoot) !== null);
+  const invalid = scopedFiles.find((file) => {
+    const relative = relativeFromRedmodRoot(file, root.sourceRoot) || "";
+    return !isValidRedmodFile(relative) && !EXTRA_FILE_EXTENSIONS.has(extname(file.path));
+  });
+  if (invalid) throw new Error(`REDmod \u5305\u542B\u65E0\u6548\u76EE\u5F55\u6216\u6587\u4EF6\u7C7B\u578B\uFF1A${invalid.path}`);
+  const rootFiles = scopedFiles.filter((file) => isValidRedmodFile(relativeFromRedmodRoot(file, root.sourceRoot) || ""));
+  const payloadFiles = rootFiles.filter((file) => file.source !== root.infoFile.source);
+  if (payloadFiles.length === 0) {
+    const sounds = Array.isArray(root.info.customSounds) ? root.info.customSounds : [];
+    if (sounds.length === 0 || sounds.some((sound) => sound?.type !== "mod_skip")) {
+      throw new Error(`REDmod \u53EA\u6709 info.json\uFF0C\u4F46\u672A\u58F0\u660E\u7EAF mod_skip \u97F3\u9891\u6761\u76EE\uFF1A${root.infoFile.path}`);
     }
   }
-  context.registerExtensionAction(GAME_ID, "deployRedmods", () => deployEnabledRedmods(context));
+  return rootFiles;
+}
+function metadataFromRoots(roots) {
+  return roots.map((root) => ({
+    name: root.info.name,
+    version: root.info.version,
+    relativePath: root.destinationRoot
+  }));
+}
+
+// src/redmod/attributes.ts
+async function listFiles(root, current = "") {
+  const directory = import_path3.default.join(root, current);
+  const entries = await import_fs2.default.promises.readdir(directory, { withFileTypes: true });
+  const files = [];
+  for (const entry of entries) {
+    const relative = current ? `${current}/${entry.name}` : entry.name;
+    if (entry.isDirectory()) files.push(...await listFiles(root, relative));
+    else if (entry.isFile()) files.push(relative.replace(/\\/g, "/"));
+  }
+  return files;
+}
+async function extractRedmodAttributes(_modInfo, stagingPath) {
+  try {
+    const pkg = preparePackage(await listFiles(stagingPath));
+    if (pkg.files.some((file) => /(^|\/)fomod\/moduleconfig\.xml$/i.test(file.path))) return {};
+    const roots = await findRedmodRoots(
+      pkg,
+      async (file) => import_fs2.default.promises.readFile(import_path3.default.join(stagingPath, file.source), "utf8")
+    );
+    if (roots.length === 0) return {};
+    for (const root of roots) validateRedmodRoot(pkg, root);
+    return {
+      cyberpunkRedmodInfo: metadataFromRoots(roots),
+      cyberpunkRedmodRequiresDeploy: true
+    };
+  } catch {
+    return {};
+  }
+}
+
+// src/redmod/fomodAttributes.ts
+function invalidFomodRedmod(message, cause) {
+  const error = new Error(message);
+  error.code = "FOMOD_INVALID_CONFIG";
+  if (cause !== void 0) error.cause = cause;
+  return error;
+}
+function normalizeDeploymentPath(value) {
+  const raw = String(value ?? "").replace(/\\/g, "/");
+  if (!raw || raw.startsWith("/") || raw.startsWith("//") || /^[A-Za-z]:/.test(raw)) {
+    throw invalidFomodRedmod(`FOMOD REDmod target path must be relative to the game directory: ${raw}`);
+  }
+  try {
+    return normalizeRelativePath2(raw);
+  } catch (error) {
+    throw invalidFomodRedmod(`FOMOD REDmod target path is unsafe: ${raw}`, error);
+  }
+}
+function projectSelectedCopies(context) {
+  const copiesByDestination = /* @__PURE__ */ new Map();
+  for (const instruction of context.instructions) {
+    if (instruction.type !== "copy") continue;
+    const destination = normalizeDeploymentPath(instruction.destination);
+    const source = normalizeRelativePath2(instruction.source);
+    const key = destination.toLowerCase();
+    copiesByDestination.delete(key);
+    copiesByDestination.set(key, { source, path: destination, lower: key });
+  }
+  const files = Array.from(copiesByDestination.values());
+  const firstRoot = files.find((file) => /^mods\/[^/]+\//i.test(file.path))?.path.split("/")[1];
+  return {
+    files,
+    packageName: sanitizePackageName(firstRoot || "FomodRedmod")
+  };
+}
+async function extractFomodRedmodAttributes(contextValue, context) {
+  if (context.modTypeId !== MOD_TYPE.fomod && context.installerTypeId !== MOD_TYPE.fomod) return {};
+  const pkg = projectSelectedCopies(context);
+  const hasCanonicalInfo = pkg.files.some((file) => /^mods\/[^/]+\/info\.json$/i.test(file.path));
+  if (!hasCanonicalInfo) {
+    return {
+      cyberpunkRedmodInfo: [],
+      cyberpunkRedmodRequiresDeploy: false
+    };
+  }
+  try {
+    const roots = await findRedmodRoots(
+      pkg,
+      async (file) => String(await contextValue.api.util.fs.readFileAsync(
+        contextValue.api.util.path.join(context.stagingPath, file.source),
+        "utf8"
+      )),
+      true
+    );
+    for (const root of roots) validateRedmodRoot(pkg, root);
+    return {
+      cyberpunkRedmodInfo: metadataFromRoots(roots),
+      cyberpunkRedmodRequiresDeploy: roots.length > 0
+    };
+  } catch (error) {
+    if (error?.code === "FOMOD_INVALID_CONFIG") throw error;
+    throw invalidFomodRedmod(`The selected FOMOD REDmod content is invalid: ${String(error?.message || error)}`, error);
+  }
+}
+function registerFomodRedmodAttributeExtractor(contextValue) {
+  const context = contextValue;
+  context.registerPostInstallerAttributeExtractor(100, (payload) => extractFomodRedmodAttributes(contextValue, payload));
+}
+
+// src/launchOptions/arguments.ts
+var REDMOD_STEAM_ARGUMENT = "-modded";
+function hasLaunchOptionArgument(launchOptions, argument = REDMOD_STEAM_ARGUMENT) {
+  const expected = String(argument || "").toLowerCase();
+  if (!expected) return false;
+  const value = String(launchOptions || "");
+  const tokens = [];
+  let token = "";
+  let quoted = false;
+  for (let index = 0; index < value.length; index += 1) {
+    const character = value[index];
+    if (character === '"') {
+      quoted = !quoted;
+      continue;
+    }
+    if (/\s/.test(character) && !quoted) {
+      if (token) tokens.push(token);
+      token = "";
+      continue;
+    }
+    token += character;
+  }
+  if (token) tokens.push(token);
+  return tokens.some((value2) => value2.toLowerCase() === expected);
+}
+
+// src/launchOptions/prompt.ts
+function buildRedmodLaunchOptionPrompt(missingUserCount) {
+  const userText = missingUserCount === 1 ? "1 \u4E2A\u672C\u5730 Steam \u7528\u6237" : `${missingUserCount} \u4E2A\u672C\u5730 Steam \u7528\u6237`;
+  return [
+    '<div style="display:flex;flex-direction:column;gap:10px;text-align:left;">',
+    `<strong>\u68C0\u6D4B\u5230 ${userText}\u5C1A\u672A\u914D\u7F6E REDmod \u542F\u52A8\u53C2\u6570\u3002</strong>`,
+    `<code style="word-break:break-all;white-space:pre-wrap;">${REDMOD_STEAM_ARGUMENT}</code>`,
+    "<span>\u786E\u8BA4\u540E\u4F1A\u5148\u5173\u95ED Steam\uFF0C\u518D\u53EA\u4E3A\u7F3A\u5C11\u8BE5\u53C2\u6570\u7684\u7528\u6237\u8FFD\u52A0\u542F\u52A8\u9879\uFF1B\u5DF2\u6709\u7684\u5176\u4ED6\u542F\u52A8\u53C2\u6570\u4F1A\u4FDD\u6301\u4E0D\u53D8\u3002</span>",
+    "<small>Heybox \u4EE5\u540E\u4E0D\u4F1A\u81EA\u52A8\u5220\u9664\u8FD9\u4E2A\u53C2\u6570\u3002\u82E5\u6682\u4E0D\u6DFB\u52A0\uFF0C\u540E\u7EED REDmod \u6210\u529F\u90E8\u7F72\u65F6\u4ECD\u4F1A\u518D\u6B21\u63D0\u9192\u3002</small>",
+    "</div>"
+  ].join("");
+}
+
+// src/launchOptions/coordinator.ts
+function responsePayload(response) {
+  return response?.payload && typeof response.payload === "object" ? response.payload : {};
+}
+var RedmodSteamLaunchOptionCoordinator = class {
+  constructor(context) {
+    this.context = context;
+  }
+  async afterDeploy(entries) {
+    if (!entries.some((entry) => entry.enabled)) return;
+    try {
+      const current = await this.context.api.util.steam.getLaunchOptions(GAME_ID);
+      if (current.length === 0) {
+        notify(
+          this.context,
+          "\u65E0\u6CD5\u914D\u7F6E Steam \u542F\u52A8\u9879",
+          "\u6CA1\u6709\u627E\u5230\u53EF\u5199\u5165\u7684\u672C\u5730 Steam \u7528\u6237\u914D\u7F6E\uFF1BREDmod \u5DF2\u5B8C\u6210\u90E8\u7F72\uFF0C\u8BF7\u786E\u8BA4 Steam \u5DF2\u5728\u672C\u673A\u767B\u5F55\u540E\u91CD\u8BD5\u90E8\u7F72\u3002",
+          "error"
+        );
+        return;
+      }
+      const missing2 = current.filter((entry) => !hasLaunchOptionArgument(entry.launchOptions));
+      if (missing2.length === 0) return;
+      const response = await this.context.api.util.ui.request({
+        type: "steam_launch_options_confirm",
+        title: "\u4E3A Cyberpunk 2077 \u6DFB\u52A0 REDmod \u542F\u52A8\u9879",
+        content: buildRedmodLaunchOptionPrompt(missing2.length),
+        confirm: { text: "\u6DFB\u52A0\u5E76\u91CD\u542F Steam", type: "primary", visible: true },
+        cancel: { text: "\u6682\u4E0D\u6DFB\u52A0", type: "cancel", visible: true },
+        requiresSteamClosed: true,
+        relaunchSteamAfterWrite: true
+      });
+      if (!response?.confirmed) return;
+      const payload = responsePayload(response);
+      if (payload.steamClosed === false) {
+        notify(this.context, "Steam \u672A\u5173\u95ED", "\u8BF7\u5B8C\u5168\u9000\u51FA Steam \u540E\uFF0C\u5728\u4E0B\u4E00\u6B21 REDmod \u90E8\u7F72\u65F6\u91CD\u8BD5\u3002", "error");
+        return;
+      }
+      const ensured = await this.context.api.util.steam.ensureLaunchOptionArgument(GAME_ID, REDMOD_STEAM_ARGUMENT);
+      const verified = await this.context.api.util.steam.getLaunchOptions(GAME_ID);
+      const verifiedUserIds = new Set(verified.map((entry) => entry.userId));
+      const success2 = ensured.failures.length === 0 && ensured.entries.length > 0 && verified.length === ensured.entries.length && current.every((entry) => verifiedUserIds.has(entry.userId)) && verified.every((entry) => hasLaunchOptionArgument(entry.launchOptions));
+      if (!success2) {
+        notify(
+          this.context,
+          "Steam \u542F\u52A8\u9879\u5199\u5165\u4E0D\u5B8C\u6574",
+          "\u90E8\u5206\u672C\u5730 Steam \u7528\u6237\u672A\u80FD\u6DFB\u52A0 -modded\uFF1B\u5DF2\u6210\u529F\u5199\u5165\u7684\u7528\u6237\u4F1A\u4FDD\u6301\u4E0D\u53D8\uFF0C\u4E0B\u6B21 REDmod \u90E8\u7F72\u65F6\u5C06\u7EE7\u7EED\u8865\u5145\u7F3A\u5931\u7528\u6237\u3002",
+          "error"
+        );
+        return;
+      }
+      notify(
+        this.context,
+        "Steam \u542F\u52A8\u9879\u5DF2\u8BBE\u7F6E",
+        `\u5DF2\u4E3A\u7F3A\u5C11\u53C2\u6570\u7684 Steam \u7528\u6237\u6DFB\u52A0 ${REDMOD_STEAM_ARGUMENT}\uFF0C\u6B63\u5728\u91CD\u65B0\u6253\u5F00 Steam\u3002`,
+        "success"
+      );
+      if (payload.relaunchSteam === false) return;
+      const launchResponse = await this.context.api.util.steam.launchClient();
+      const launchPayload = responsePayload(launchResponse);
+      if (launchResponse?.confirmed && launchPayload.success !== false) return;
+      notify(
+        this.context,
+        "Steam \u542F\u52A8\u5931\u8D25",
+        String(launchPayload.error || "\u542F\u52A8\u9879\u5DF2\u5199\u5165\uFF0C\u4F46 Steam \u672A\u80FD\u81EA\u52A8\u542F\u52A8\uFF0C\u8BF7\u624B\u52A8\u6253\u5F00 Steam\u3002"),
+        "error"
+      );
+    } catch (error) {
+      notify(
+        this.context,
+        "Steam \u542F\u52A8\u9879\u914D\u7F6E\u5931\u8D25",
+        error instanceof Error ? error.message : String(error),
+        "error"
+      );
+    }
+  }
+};
+
+// src/loadOrder/index.ts
+function registerRedmodLoadOrder(contextValue) {
+  const context = contextValue;
+  const launchOptions = new RedmodSteamLaunchOptionCoordinator(contextValue);
+  context.registerAttributeExtractor(100, extractRedmodAttributes);
+  registerFomodRedmodAttributeExtractor(contextValue);
+  context.registerLoadOrder({
+    id: REDMOD_LOAD_ORDER_PROVIDER_ID,
+    gameId: GAME_ID,
+    title: "REDmod \u52A0\u8F7D\u987A\u5E8F",
+    usageInstructions: [
+      "\u8D8A\u9760\u524D\u7684 REDmod \u4F18\u5148\u7EA7\u8D8A\u9AD8\u3002",
+      "\u7981\u7528\u9879\u76EE\u4ECD\u4F1A\u4FDD\u7559\u4F4D\u7F6E\uFF0C\u4F46\u4E0D\u4F1A\u5199\u5165\u672C\u6B21 REDmod \u90E8\u7F72\u3002"
+    ],
+    modTypes: [MOD_TYPE.redmod, MOD_TYPE.multiTypeRedmod, MOD_TYPE.fomod],
+    isModRelevant: isRedmodLoadOrderModRelevant,
+    deserializeLoadOrder: deserializeRedmodLoadOrder,
+    serializeLoadOrder: serializeAndDeployRedmods,
+    onDidDeploy: (entries) => launchOptions.afterDeploy(entries)
+  });
+  context.registerExtensionAction(GAME_ID, "deployRedmods", () => context.api.loadOrder.deploy(REDMOD_LOAD_ORDER_PROVIDER_ID));
 }
 
 // src/game.ts
@@ -1045,72 +1479,6 @@ function registerFomodInstaller(contextValue, options) {
   });
 }
 
-// src/package.ts
-function normalizeRelativePath(value) {
-  const normalized = String(value ?? "").replace(/\\/g, "/").replace(/^\.\//, "").replace(/^\/+/, "").replace(/\/{2,}/g, "/").replace(/\/$/, "");
-  if (!normalized) return "";
-  const segments = normalized.split("/");
-  if (segments.includes("..") || /^[A-Za-z]:/.test(normalized)) {
-    throw new Error(`Unsafe archive path: ${value}`);
-  }
-  return normalized;
-}
-function sanitizePackageName(value) {
-  const cleaned = String(value ?? "").replace(/[<>:"/\\|?*\x00-\x1F]/g, " ").replace(/\s+/g, " ").trim().replace(/[. ]+$/, "");
-  return cleaned || "Cyberpunk2077Mod";
-}
-function commonWrapper(paths) {
-  if (paths.length === 0) return void 0;
-  const first2 = paths[0].split("/")[0];
-  if (!first2 || paths.some((file) => file.split("/")[0].toLowerCase() !== first2.toLowerCase())) return void 0;
-  if (KNOWN_TOP_LEVEL_DIRS.has(first2.toLowerCase())) return void 0;
-  const unwrapped = paths.map((file) => file.slice(first2.length + 1)).filter(Boolean);
-  if (unwrapped.length !== paths.length) return void 0;
-  const revealsKnownRoot = unwrapped.some((file) => KNOWN_TOP_LEVEL_DIRS.has(file.split("/")[0].toLowerCase()));
-  return revealsKnownRoot ? first2 : void 0;
-}
-function preparePackage(inputFiles) {
-  const normalized = inputFiles.map(normalizeRelativePath).filter(Boolean);
-  const wrapper = commonWrapper(normalized);
-  const files = normalized.map((source) => {
-    const path2 = wrapper ? source.slice(wrapper.length + 1) : source;
-    return { source, path: path2, lower: path2.toLowerCase() };
-  });
-  const fallbackName = files.find((file) => file.path.includes("/"))?.path.split("/")[0] || files[0]?.path.replace(/\.[^.]+$/, "") || "Cyberpunk2077Mod";
-  return {
-    files,
-    wrapper,
-    packageName: sanitizePackageName(wrapper || fallbackName)
-  };
-}
-function extname(filePath) {
-  const name = filePath.split("/").pop() || "";
-  const dot = name.lastIndexOf(".");
-  return dot > 0 ? name.slice(dot).toLowerCase() : "";
-}
-function basename(filePath) {
-  return filePath.split("/").pop() || "";
-}
-function dirname(filePath) {
-  const index = filePath.lastIndexOf("/");
-  return index < 0 ? "" : filePath.slice(0, index);
-}
-function isUnder(file, prefix) {
-  const normalized = normalizeRelativePath(prefix).toLowerCase();
-  return file.lower === normalized || file.lower.startsWith(`${normalized}/`);
-}
-function relativeTo(file, prefix) {
-  const normalized = normalizeRelativePath(prefix);
-  return file.path.slice(normalized.length).replace(/^\//, "");
-}
-function hasPath(files, expected) {
-  const lower = normalizeRelativePath(expected).toLowerCase();
-  return files.some((file) => file.lower === lower);
-}
-function hasAllPaths(files, expected) {
-  return expected.every((path2) => hasPath(files, path2));
-}
-
 // src/installers/shared.ts
 function copy(file, destination = file.path) {
   return { type: "copy", source: file.source, destination };
@@ -1124,9 +1492,11 @@ function filesUnder(files, prefix) {
 function extraDestination(input, file) {
   return `${PATHS.extras}/${input.pkg.packageName}/${file.path}`;
 }
+function findUnsafeUnmappedFiles(input, mapped) {
+  return input.pkg.files.filter((file) => !mapped.has(file.source) && !EXTRA_FILE_EXTENSIONS.has(extname(file.path)));
+}
 async function finalizeMappedInstall(input, modTypeId, mapped, attributes = []) {
-  const remaining = input.pkg.files.filter((file) => !mapped.has(file.source));
-  const unsafeRemaining = remaining.filter((file) => !EXTRA_FILE_EXTENSIONS.has(extname(file.path)));
+  const unsafeRemaining = findUnsafeUnmappedFiles(input, mapped);
   if (unsafeRemaining.length > 0) {
     return installFallback(
       input,
@@ -1235,15 +1605,15 @@ var ammCandidate = {
 
 // src/installers/config.ts
 var JSON_PROTECTED_PATHS = /* @__PURE__ */ new Set([
-  ...Object.values(JSON_CANONICAL_PATHS).map((path2) => path2.toLowerCase()),
+  ...Object.values(JSON_CANONICAL_PATHS).map((path4) => path4.toLowerCase()),
   "r6/config/settings/options.json",
   "r6/config/settings/platform/pc/options.json"
 ]);
-function isProtectedJson(file) {
-  return JSON_PROTECTED_PATHS.has(file.lower) || (isUnder(file, "engine/config") || isUnder(file, "r6/config")) && extname(file.path) === ".json";
+function isJsonInProtectedTree(file) {
+  return (isUnder(file, "engine/config") || isUnder(file, "r6/config")) && extname(file.path) === ".json";
 }
 function hasJsonConfig(files, canonicalOnly = false) {
-  if (files.some(isProtectedJson)) return true;
+  if (files.some((file) => JSON_PROTECTED_PATHS.has(file.lower) || isJsonInProtectedTree(file))) return true;
   if (canonicalOnly) return false;
   return files.some((file) => !file.path.includes("/") && [...Object.keys(JSON_CANONICAL_PATHS), "options.json"].includes(basename(file.lower)));
 }
@@ -1251,7 +1621,7 @@ function mapJsonConfig(files, mapped) {
   let protectedFiles = false;
   let unresolved = false;
   for (const file of files) {
-    if (isProtectedJson(file)) {
+    if (JSON_PROTECTED_PATHS.has(file.lower)) {
       protectedFiles = true;
       mapInstruction(mapped, file);
       continue;
@@ -1313,8 +1683,12 @@ var jsonConfig = {
   install: async (input) => {
     const mapped = /* @__PURE__ */ new Map();
     const state = mapJsonConfig(input.pkg.files, mapped);
-    if (state.unresolved || mapped.size === 0) {
+    if (state.unresolved) {
       return installFallback(input, "\u9876\u5C42 options.json \u65E0\u6CD5\u53EF\u9760\u5224\u65AD\u5C5E\u4E8E r6/config/settings \u8FD8\u662F platform/pc\u3002");
+    }
+    if (mapped.size === 0) return finalizeMappedInstall(input, MOD_TYPE.jsonConfig, mapped);
+    if (findUnsafeUnmappedFiles(input, mapped).length > 0) {
+      return finalizeMappedInstall(input, MOD_TYPE.jsonConfig, mapped);
     }
     if (state.protected) {
       await confirmInstall(input.context, "\u5B89\u88C5\u53D7\u4FDD\u62A4\u7684 JSON \u914D\u7F6E", "\u8BE5 Mod \u4F1A\u8986\u76D6 Cyberpunk 2077 \u7684\u6838\u5FC3 JSON \u914D\u7F6E\u6587\u4EF6\u3002\u8BF7\u786E\u8BA4\u5176\u4E0E\u5F53\u524D\u6E38\u620F\u7248\u672C\u517C\u5BB9\u3002");
@@ -1329,6 +1703,9 @@ var xmlConfig = {
   install: async (input) => {
     const mapped = /* @__PURE__ */ new Map();
     const state = mapXmlConfig(input.pkg.files, mapped);
+    if (findUnsafeUnmappedFiles(input, mapped).length > 0) {
+      return finalizeMappedInstall(input, MOD_TYPE.xmlConfig, mapped);
+    }
     if (state.protected) {
       await confirmInstall(input.context, "\u5B89\u88C5\u53D7\u4FDD\u62A4\u7684 XML \u914D\u7F6E", "\u8BE5 Mod \u4F1A\u8986\u76D6 inputContexts\u3001inputUserMappings \u7B49\u8F93\u5165\u914D\u7F6E\u3002\u8BF7\u786E\u8BA4\u5176\u4E0E\u5F53\u524D\u6E38\u620F\u7248\u672C\u53CA\u5176\u4ED6\u8F93\u5165 Mod \u517C\u5BB9\u3002");
     }
@@ -1351,7 +1728,7 @@ var ini = {
         const marker = "/reshade-shaders/";
         const index = `/${file.lower}`.indexOf(marker);
         if (index < 0) continue;
-        const suffix = file.path.slice(index + 1);
+        const suffix = file.path.slice(index);
         mapInstruction(mapped, file, `${PATHS.reshade}/${suffix}`);
       }
     }
@@ -1439,8 +1816,9 @@ var ARCHIVE_XL = [
   "red4ext/plugins/archivexl/scripts/archivexl.reds",
   "red4ext/plugins/archivexl/third_party_licenses"
 ];
+var CYBERCAT_EXECUTABLE = "cp2077saveeditor.exe";
 var CYBERCAT = [
-  "cp2077saveeditor.exe",
+  CYBERCAT_EXECUTABLE,
   "d3dcompiler_47_cor3.dll",
   "e_sqlite3.dll",
   "kraken.dll",
@@ -1549,7 +1927,7 @@ var coreInputLoader = {
 var coreCyberCat = {
   id: "Core CyberCAT",
   modTypeId: MOD_TYPE.coreCyberCat,
-  matches: ({ pkg }) => CYBERCAT.some((path2) => hasPath(pkg.files, path2)),
+  matches: ({ pkg }) => hasPath(pkg.files, CYBERCAT_EXECUTABLE),
   install: (input) => {
     if (!hasAllPaths(input.pkg.files, CYBERCAT)) missing("CyberCAT");
     notify(input.context, "CyberCAT \u5DF2\u5B89\u88C5", "CyberCAT \u662F\u72EC\u7ACB\u5DE5\u5177\uFF1B\u542F\u7528\u5E76\u90E8\u7F72\u540E\u8BF7\u4ECE\u6E38\u620F\u76EE\u5F55\u7684 CyberCAT \u6587\u4EF6\u5939\u624B\u52A8\u542F\u52A8\u3002", "info");
@@ -1574,6 +1952,24 @@ var CORE_CANDIDATES = [
   strictCandidate("Core Appearance Menu Mod", MOD_TYPE.coreAmm, AMM_CORE[0], AMM_CORE),
   strictCandidate("Core CyberScript", MOD_TYPE.coreCyberScript, CYBERSCRIPT[0], CYBERSCRIPT)
 ];
+
+// src/installers/red4ext/safety.ts
+var RED4EXT_RESERVED_DLL_DIRECTORY = "bin/x64";
+function isDangerousRed4extDll(file) {
+  if (extname(file.path) !== ".dll") return false;
+  const directory = dirname(file.lower);
+  const isReservedDirectory = directory === RED4EXT_RESERVED_DLL_DIRECTORY;
+  const isReservedTopLevelName = directory === "" && RED4EXT_RESERVED_DLLS.has(basename(file.lower));
+  return isReservedDirectory || isReservedTopLevelName;
+}
+function findDangerousRed4extDlls(files) {
+  return files.filter(isDangerousRed4extDll);
+}
+function assertSafeRed4ext(files) {
+  const dangerous = findDangerousRed4extDlls(files);
+  if (dangerous.length === 0) return;
+  throw new Error(`RED4ext Mod \u5305\u542B\u7981\u6B62\u8986\u76D6\u7684\u8FD0\u884C\u5E93 DLL\uFF1A${dangerous.map((file) => file.path).join(", ")}`);
+}
 
 // src/installers/gameplay.ts
 var CET_PREFIX = `${PATHS.cetMods.toLowerCase()}/`;
@@ -1615,17 +2011,8 @@ function hasRed4ext(files, canonicalOnly = false) {
   if (hasPath(files, "red4ext/red4ext.dll")) return false;
   return dllFiles(files).some((file) => {
     if (canonicalOnly) return file.lower.startsWith(RED4EXT_PREFIX);
-    return file.lower.startsWith(RED4EXT_PREFIX) || !file.path.includes("/") || dirname(file.path).split("/").length === 1;
+    return isDangerousRed4extDll(file) || file.lower.startsWith(RED4EXT_PREFIX) || !file.path.includes("/") || dirname(file.path).split("/").length === 1;
   });
-}
-function assertSafeRed4ext(files) {
-  const dangerous = dllFiles(files).filter((file) => {
-    const name = basename(file.lower);
-    return RED4EXT_RESERVED_DLLS.has(name) || isUnder(file, "bin/x64") && RED4EXT_RESERVED_DLLS.has(name);
-  });
-  if (dangerous.length > 0) {
-    throw new Error(`RED4ext Mod \u5305\u542B\u7981\u6B62\u8986\u76D6\u7684\u8FD0\u884C\u5E93 DLL\uFF1A${dangerous.map((file) => file.path).join(", ")}`);
-  }
 }
 function mapArchiveFiles(files, mapped) {
   for (const file of files) {
@@ -1789,102 +2176,21 @@ var archive = {
 var GAMEPLAY_CANDIDATES = { asi, red4ext, cet, redscript, audioware, tweakXL, archive };
 
 // src/installers/redmod.ts
-var SCRIPT_DIRS = /* @__PURE__ */ new Set(["core", "cyberpunk", "exec", "samples", "tests"]);
-var TWEAK_DIRS = ["base/gameplay/static_data", "ep1/gameplay/static_data"];
 function hasRedmod(files, canonicalOnly = false) {
-  return files.some((file) => {
-    if (canonicalOnly) return /^mods\/[^/]+\/info\.json$/i.test(file.path);
-    return file.lower === "info.json" || /^mods\/[^/]+\/info\.json$/i.test(file.path) || /^[^/]+\/info\.json$/i.test(file.path);
-  });
-}
-async function decodeInfo(input, file) {
-  let value;
-  try {
-    value = JSON.parse(await readText(input, file));
-  } catch (error) {
-    throw new Error(`REDmod info.json \u65E0\u6CD5\u89E3\u6790\uFF1A${file.path} (${String(error)})`);
-  }
-  const info = value;
-  if (!info || typeof info.name !== "string" || !info.name.trim() || typeof info.version !== "string" || !info.version.trim()) {
-    throw new Error(`REDmod info.json \u7F3A\u5C11\u6709\u6548\u7684 name/version\uFF1A${file.path}`);
-  }
-  return info;
-}
-async function findRoots(input, canonicalOnly) {
-  const roots = [];
-  for (const file of input.pkg.files) {
-    let sourceRoot = null;
-    let destinationRoot = null;
-    const canonical = file.path.match(/^mods\/([^/]+)\/info\.json$/i);
-    const named = file.path.match(/^([^/]+)\/info\.json$/i);
-    if (canonical) {
-      sourceRoot = `mods/${canonical[1]}`;
-      destinationRoot = sourceRoot;
-    } else if (!canonicalOnly && file.lower === "info.json") {
-      sourceRoot = "";
-    } else if (!canonicalOnly && named) {
-      sourceRoot = named[1];
-      destinationRoot = `mods/${named[1]}`;
-    }
-    if (sourceRoot === null) continue;
-    const info = await decodeInfo(input, file);
-    destinationRoot ||= `mods/${sanitizePackageName(info.name || input.pkg.packageName)}`;
-    roots.push({ infoFile: file, sourceRoot, destinationRoot, info });
-  }
-  return roots;
-}
-function relativeFromRoot(file, root) {
-  if (!root) return file.path;
-  if (file.path.toLowerCase() === root.toLowerCase()) return "";
-  if (!file.path.toLowerCase().startsWith(`${root.toLowerCase()}/`)) return null;
-  return file.path.slice(root.length + 1);
-}
-function validateRedmodFile(relativePath) {
-  const lower = relativePath.toLowerCase();
-  if (lower === "info.json") return true;
-  const segments = lower.split("/");
-  if (segments[0] === "archives") return [".archive", ".xl"].includes(extname(lower));
-  if (segments[0] === "customsounds") return extname(lower) === ".wav";
-  if (segments[0] === "scripts") {
-    return segments.length >= 3 && SCRIPT_DIRS.has(segments[1]) && [".script", ".ws"].includes(extname(lower));
-  }
-  if (segments[0] === "tweaks") {
-    const parent = segments.slice(1, -1).join("/");
-    return TWEAK_DIRS.includes(parent) && extname(lower) === ".tweak";
-  }
-  return false;
+  return hasRedmodInfo(files, canonicalOnly);
 }
 async function mapRedmods(input, mapped, canonicalOnly = false) {
-  const roots = await findRoots(input, canonicalOnly);
+  const roots = await findRedmodRoots(input.pkg, (file) => readText(input, file), canonicalOnly);
   if (roots.length === 0) return [];
-  const metadata = [];
   for (const root of roots) {
-    const scopedFiles = input.pkg.files.filter((file) => relativeFromRoot(file, root.sourceRoot) !== null);
-    const invalid = scopedFiles.find((file) => {
-      const relative = relativeFromRoot(file, root.sourceRoot) || "";
-      return !validateRedmodFile(relative) && !EXTRA_FILE_EXTENSIONS.has(extname(file.path));
-    });
-    if (invalid) throw new Error(`REDmod \u5305\u542B\u65E0\u6548\u76EE\u5F55\u6216\u6587\u4EF6\u7C7B\u578B\uFF1A${invalid.path}`);
-    const rootFiles = scopedFiles.filter((file) => validateRedmodFile(relativeFromRoot(file, root.sourceRoot) || ""));
-    const payloadFiles = rootFiles.filter((file) => file.source !== root.infoFile.source);
-    if (payloadFiles.length === 0) {
-      const sounds = Array.isArray(root.info.customSounds) ? root.info.customSounds : [];
-      if (sounds.length === 0 || sounds.some((sound) => sound?.type !== "mod_skip")) {
-        throw new Error(`REDmod \u53EA\u6709 info.json\uFF0C\u4F46\u672A\u58F0\u660E\u7EAF mod_skip \u97F3\u9891\u6761\u76EE\uFF1A${root.infoFile.path}`);
-      }
-    }
+    const rootFiles = validateRedmodRoot(input.pkg, root);
     for (const file of rootFiles) {
-      const relative = relativeFromRoot(file, root.sourceRoot) || basename(file.path);
+      const relative = relativeFromRedmodRoot(file, root.sourceRoot) || basename(file.path);
       mapInstruction(mapped, file, `${root.destinationRoot}/${relative}`);
     }
-    metadata.push({
-      name: root.info.name,
-      version: root.info.version,
-      relativePath: root.destinationRoot
-    });
   }
   return [
-    { type: "attribute", key: "cyberpunkRedmodInfo", value: metadata },
+    { type: "attribute", key: "cyberpunkRedmodInfo", value: metadataFromRoots(roots) },
     { type: "attribute", key: "cyberpunkRedmodRequiresDeploy", value: true }
   ];
 }
@@ -1931,19 +2237,28 @@ var multiTypeCandidate = {
     if (kinds.includes("red4ext")) mapRed4extFiles(input, mapped, true);
     if (kinds.includes("tweak-xl")) mapTweakXLFiles(input.pkg.files, mapped);
     let protectedConfig = false;
+    let unresolvedConfig = false;
     if (kinds.includes("json")) {
       const state = mapJsonConfig(input.pkg.files, mapped);
-      if (state.unresolved) throw new Error("Multi-type Mod \u4E2D\u5305\u542B\u65E0\u6CD5\u786E\u5B9A\u76EE\u6807\u8DEF\u5F84\u7684 options.json\u3002");
+      unresolvedConfig ||= state.unresolved;
       protectedConfig ||= state.protected;
     }
     if (kinds.includes("xml")) {
       protectedConfig ||= mapXmlConfig(input.pkg.files, mapped).protected;
     }
-    if (protectedConfig) {
-      await confirmInstall(input.context, "\u5B89\u88C5\u53D7\u4FDD\u62A4\u7684\u6E38\u620F\u914D\u7F6E", "\u8BE5 Multi-type Mod \u4F1A\u8986\u76D6 Cyberpunk 2077 \u7684 JSON/XML \u6838\u5FC3\u914D\u7F6E\u3002");
-    }
     if (kinds.includes("redmod")) {
       attributes.push(...await mapRedmods(input, mapped, true));
+    }
+    if (unresolvedConfig || findUnsafeUnmappedFiles(input, mapped).length > 0) {
+      return finalizeMappedInstall(
+        input,
+        kinds.includes("redmod") ? MOD_TYPE.multiTypeRedmod : MOD_TYPE.multiType,
+        mapped,
+        attributes
+      );
+    }
+    if (protectedConfig) {
+      await confirmInstall(input.context, "\u5B89\u88C5\u53D7\u4FDD\u62A4\u7684\u6E38\u620F\u914D\u7F6E", "\u8BE5 Multi-type Mod \u4F1A\u8986\u76D6 Cyberpunk 2077 \u7684 JSON/XML \u6838\u5FC3\u914D\u7F6E\u3002");
     }
     return finalizeMappedInstall(
       input,
@@ -2069,7 +2384,7 @@ function registerCyberpunkModTypes(context) {
 async function main(context) {
   registerCyberpunkGame(context);
   registerCyberpunkModTypes(context);
-  registerRedmodDeployment(context);
+  registerRedmodLoadOrder(context);
   return true;
 }
 var src_default = main;

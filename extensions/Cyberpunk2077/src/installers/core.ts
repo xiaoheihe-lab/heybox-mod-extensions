@@ -90,8 +90,9 @@ const ARCHIVE_XL = [
   'red4ext/plugins/archivexl/third_party_licenses',
 ]
 
+const CYBERCAT_EXECUTABLE = 'cp2077saveeditor.exe'
 const CYBERCAT = [
-  'cp2077saveeditor.exe', 'd3dcompiler_47_cor3.dll', 'e_sqlite3.dll', 'kraken.dll',
+  CYBERCAT_EXECUTABLE, 'd3dcompiler_47_cor3.dll', 'e_sqlite3.dll', 'kraken.dll',
   'penimc_cor3.dll', 'presentationnative_cor3.dll', 'vcruntime140_cor3.dll', 'wpfgfx_cor3.dll',
 ]
 
@@ -209,7 +210,7 @@ const coreInputLoader: Candidate = {
 const coreCyberCat: Candidate = {
   id: 'Core CyberCAT',
   modTypeId: MOD_TYPE.coreCyberCat,
-  matches: ({ pkg }) => CYBERCAT.some((path) => hasPath(pkg.files, path)),
+  matches: ({ pkg }) => hasPath(pkg.files, CYBERCAT_EXECUTABLE),
   install: (input) => {
     if (!hasAllPaths(input.pkg.files, CYBERCAT)) missing('CyberCAT')
     notify(input.context, 'CyberCAT 已安装', 'CyberCAT 是独立工具；启用并部署后请从游戏目录的 CyberCAT 文件夹手动启动。', 'info')

@@ -1,10 +1,8 @@
 import {
   MOD_TYPE,
   PATHS,
-  RED4EXT_RESERVED_DLLS,
 } from '../constants'
 import {
-  basename,
   dirname,
   extname,
   hasPath,
@@ -21,6 +19,7 @@ import {
   mapInstruction,
   mapSame,
 } from './shared'
+import { assertSafeRed4ext, isDangerousRed4extDll } from './red4ext/safety'
 
 const CET_PREFIX = `${PATHS.cetMods.toLowerCase()}/`
 const REDSCRIPT_PREFIX = `${PATHS.redscript.toLowerCase()}/`
@@ -70,18 +69,11 @@ export function hasRed4ext(files: PackageFile[], canonicalOnly = false): boolean
   if (hasPath(files, 'red4ext/red4ext.dll')) return false
   return dllFiles(files).some((file) => {
     if (canonicalOnly) return file.lower.startsWith(RED4EXT_PREFIX)
-    return file.lower.startsWith(RED4EXT_PREFIX) || !file.path.includes('/') || dirname(file.path).split('/').length === 1
+    return isDangerousRed4extDll(file)
+      || file.lower.startsWith(RED4EXT_PREFIX)
+      || !file.path.includes('/')
+      || dirname(file.path).split('/').length === 1
   })
-}
-
-export function assertSafeRed4ext(files: PackageFile[]): void {
-  const dangerous = dllFiles(files).filter((file) => {
-    const name = basename(file.lower)
-    return RED4EXT_RESERVED_DLLS.has(name) || (isUnder(file, 'bin/x64') && RED4EXT_RESERVED_DLLS.has(name))
-  })
-  if (dangerous.length > 0) {
-    throw new Error(`RED4ext Mod 包含禁止覆盖的运行库 DLL：${dangerous.map((file) => file.path).join(', ')}`)
-  }
 }
 
 export function mapArchiveFiles(files: PackageFile[], mapped: Map<string, InstallInstruction>): void {

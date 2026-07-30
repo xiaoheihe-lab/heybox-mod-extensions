@@ -6,7 +6,7 @@ import { getRedmodStatus, registerCyberpunkGame } from '../src/game'
 import { installCyberpunkPackage, testCyberpunkPackage } from '../src/installers/pipeline'
 import { registerCyberpunkModTypes } from '../src/modTypes'
 import { preparePackage } from '../src/package'
-import { collectEnabledRedmods, registerRedmodDeployment } from '../src/redmodDeployment'
+import { registerRedmodDeployment } from '../src/redmodDeployment'
 import { fakeContext } from './helpers/context'
 
 test('Cyberpunk 2077 general installer and registration regressions', async () => {
@@ -41,23 +41,23 @@ test('Cyberpunk 2077 general installer and registration regressions', async () =
   assert.ok(registrations.types.some((item: any) => item.id === MOD_TYPE.redmod))
   assert.deepEqual(registrations.actions, [{ gameId: GAME_ID, action: 'getRedmodStatus' }])
 
-  const hookRegistrations: any[] = []
+  const loadOrderRegistrations: any[] = []
+  const extractors: any[] = []
+  const postInstallerExtractors: any[] = []
   const deploymentActions: any[] = []
   registerRedmodDeployment({
-    registerManagedDeploymentHook: (phase: string, options: any) => hookRegistrations.push({ phase, options }),
+    api: { loadOrder: { deploy: async () => ({}) } },
+    registerAttributeExtractor: (priority: number, extractor: any) => extractors.push({ priority, extractor }),
+    registerPostInstallerAttributeExtractor: (priority: number, extractor: any) => postInstallerExtractors.push({ priority, extractor }),
+    registerLoadOrder: (options: any) => loadOrderRegistrations.push(options),
     registerExtensionAction: (gameId: number, action: string) => deploymentActions.push({ gameId, action }),
   } as any)
-  assert.equal(hookRegistrations.length, 6)
-  assert.ok(hookRegistrations.some((item) => item.options.modType === MOD_TYPE.multiTypeRedmod))
+  assert.equal(loadOrderRegistrations.length, 1)
+  assert.deepEqual(loadOrderRegistrations[0].modTypes, [MOD_TYPE.redmod, MOD_TYPE.multiTypeRedmod, MOD_TYPE.fomod])
+  assert.equal(typeof loadOrderRegistrations[0].onDidDeploy, 'function')
+  assert.equal(extractors[0].priority, 100)
+  assert.equal(postInstallerExtractors[0].priority, 100)
   assert.deepEqual(deploymentActions, [{ gameId: GAME_ID, action: 'deployRedmods' }])
-  assert.deepEqual(collectEnabledRedmods([
-    { modKey: '1', metaInfo: { cyberpunkRedmodInfo: [{ name: 'First', relativePath: 'mods/First' }] } },
-    { modKey: '1', metaInfo: { cyberpunkRedmodInfo: [{ name: 'First', relativePath: 'mods/First' }] } },
-    { modKey: '2', metaInfo: { cyberpunkRedmodInfo: [{ name: 'Second', relativePath: 'mods/Second' }] } },
-  ]), [
-    { name: 'First', relativePath: 'mods/First' },
-    { name: 'Second', relativePath: 'mods/Second' },
-  ])
 
   const cetCore = await installCyberpunkPackage(fakeContext().context, [
     'CET/bin/x64/plugins/cyber_engine_tweaks.asi',

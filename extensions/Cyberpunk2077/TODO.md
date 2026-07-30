@@ -11,17 +11,19 @@
 
 ## P0：REDmod Load Order
 
-- [ ] 提供可编辑的 REDmod 加载顺序。
-- [ ] 按合适的游戏/profile 作用域持久化加载顺序。
-- [ ] 禁用 REDmod 后保留位置，再次启用时恢复。
-- [ ] 生成 `V2077/modlist.txt` 时严格使用用户配置顺序。
-- [ ] 处理新增、删除、重命名及失效 REDmod 条目。
-- [ ] 明确多类型 Mod 中 REDmod 部分参与排序的规则。
-- [ ] 补充排序、持久化、禁用恢复及部署结果测试。
+- [x] 提供可编辑的 REDmod 加载顺序。
+- [x] 按当前 Heybox 用户及 appid 作用域持久化加载顺序。
+- [x] 禁用 REDmod 后保留位置，再次启用时恢复。
+- [x] 生成 `V2077/modlist.txt` 时严格使用用户配置顺序。
+- [x] 处理新增、删除、重命名及失效 REDmod 条目。
+- [x] 明确多类型 Mod 中 REDmod 部分参与排序的规则。
+- [x] 补充排序、持久化、禁用恢复及部署结果测试。
+
+- [x] FOMOD 可选 REDmod 在最终选择后提取 metadata，重配置时同步增删排序条目且不生成幽灵条目。
 
 ## P1：启动与外部工具集成
 
-- [ ] 提供带 `-modded` 参数的游戏启动方式。
+- [x] 首次成功部署非空 REDmod 后，为所有缺少参数的本地 Steam 用户保留原启动项并追加 `-modded`；取消后下次部署重试，且永不自动删除该参数。
 - [ ] 评估并接入 REDlauncher 工具入口。
 - [ ] 评估并接入手动 REDdeploy 操作或工具入口。
 - [ ] 为 CyberCAT 提供可启动的工具入口，而不只是安装后通知。
@@ -52,11 +54,13 @@
 ## P5：测试与回归
 
 - [ ] 继续将核心安装器拆分为按类型组织的 fixture 测试。
-- [ ] 覆盖 REDmod 生命周期：启用、禁用、卸载、重新排序和部署失败。
-- [ ] 覆盖受保护 RED4ext DLL、配置覆盖确认和未知文件整体 fallback。
-- [ ] 覆盖多类型 Mod 与 REDmod 部署的组合场景。
-- [ ] 保持普通非 FOMOD 安装 pipeline 不回归。
-- [ ] 每轮完成 extension lint、typecheck、unit test 和 build。
+- [x] 覆盖 REDmod 生命周期：启用、禁用、卸载、重新排序和部署失败。
+- [x] 覆盖受保护 RED4ext DLL。
+- [x] 覆盖受保护 JSON/XML 目标路径的安装确认与取消（路径级保护，不读取或比较游戏内现有文件内容）。
+- [x] 覆盖专用安装器遇到未知文件时的整包 fallback。
+- [x] 覆盖多类型 Mod 与 REDmod 部署的组合场景。
+- [x] 保持普通非 FOMOD 安装 pipeline 不回归。
+- [x] 每轮完成 extension lint、typecheck、unit test 和 build。
 
 ## 暂缓项目
 
