@@ -1,0 +1,11 @@
+export { registerFomodInstaller, isFomodPackage } from './installer/register.js';
+export { parseModuleConfig } from './parser/module-config.js';
+export { parseInfoXml } from './parser/info.js';
+export { evaluateDependency, resolveOptionType } from './evaluator/dependencies.js';
+export { validateStepSelections, defaultSelections } from './evaluator/selection.js';
+export { findFomodRoot, normalizeArchivePath } from './security/paths.js';
+export { FomodError } from './installer/errors.js';
+export { runFomod } from './installer/run.js';
+export { expandFileItems } from './installer/files.js';
+export { loadImageDataUrl } from './installer/images.js';
+export { assertSafeXml, assertSupportedXmlFeatures } from './security/xml.js';
