@@ -6,7 +6,7 @@
     "build": "node ../../internal/build/build.mjs . --local",
     "build:extension": "node ../../internal/build/build.mjs .",
     "lint": "tsc --noEmit",
-    "test": "echo \"no tests\""
+    "test": "node test/run-tests.mjs"
   },
   "devDependencies": {
     "@heybox-mod-extensions/shared-utils": "workspace:*",

@@ -1,5 +1,6 @@
 import type { IExtensionContext } from 'heybox-mod-api';
 import {
+  BINARIES_PATH,
   DATA_ID,
   DATA_NAME,
   DATA_PATH,
@@ -10,6 +11,8 @@ import {
   PATCH_ID,
   PATCH_NAME,
   PATCH_PATH,
+  RESHADE_ID,
+  RESHADE_NAME,
   SOUND_PATCH_ID,
   SOUND_PATCH_NAME,
   STEAM_APP_ID,
@@ -20,6 +23,7 @@ import {
 import type { InstallOptions } from './src/types';
 import { registerModType } from './src/game';
 import { installDlbin, installStream, testDlbin, testStream } from './src/basic-installers';
+import { installReshade, testReshade } from './src/reshade';
 import {
   installPatchMulti,
   installSoundPatchMulti,
@@ -65,6 +69,7 @@ async function main(context: IExtensionContext) {
   registerModType(context, SOUND_PATCH_ID, 90, PATCH_PATH, SOUND_PATCH_NAME);
   registerModType(context, DATA_ID, 80, DATA_PATH, DATA_NAME);
   registerModType(context, STREAM_ID, 70, STREAM_PATH, STREAM_NAME);
+  registerModType(context, RESHADE_ID, 60, BINARIES_PATH, RESHADE_NAME);
 
   context.registerInstaller(PATCH_ID, 27, testPatch, (files, stagingPath, options) => installPatchMulti(context, files, {
     ...(options as InstallOptions || {}),
@@ -76,6 +81,7 @@ async function main(context: IExtensionContext) {
   }));
   context.registerInstaller(DATA_ID, 25, testDlbin, installDlbin);
   context.registerInstaller(STREAM_ID, 31, testStream, installStream);
+  context.registerInstaller(RESHADE_ID, 32, testReshade, installReshade);
 
   registerPatchNormalizeHooks(context);
   return true;

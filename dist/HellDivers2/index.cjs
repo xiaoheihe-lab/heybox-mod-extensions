@@ -37,6 +37,9 @@ var STREAM_ID = "helldivers2-stream";
 var STREAM_NAME = "Data Stream File (.stream)";
 var STREAM_PATH = "data";
 var STREAM_EXT = ".stream";
+var BINARIES_PATH = "bin";
+var RESHADE_ID = "helldivers2-reshade";
+var RESHADE_NAME = "ReShade Preset";
 var PATCH_ID = "helldivers2-patch--MergedMods--This-is-fine--Ignore-this--SELECT-APPLY-CHANGES--DO-NOT-ENABLE";
 var PATCH_NAME = "Data Patch (.patch0)";
 var PATCH_PATH = "data";
@@ -162,6 +165,30 @@ function installStream(files) {
     destination: getRootRelativeDestination(file, rootPath)
   }));
   return { instructions, modType: STREAM_ID };
+}
+
+// src/reshade.ts
+var INI_EXT = ".ini";
+function testReshade(files, gameId) {
+  const supported = isGameId(gameId) && !hasFomodInstaller(files) && files.some((file) => archiveExtname(file) === INI_EXT);
+  return testerResult(supported);
+}
+function installReshade(files) {
+  const preset = files.find((file) => archiveExtname(file) === INI_EXT);
+  if (!preset) return { instructions: [], modType: RESHADE_ID };
+  const rootPath = archiveDirname(preset);
+  const instructions = filterUnderRoot(files, rootPath).map((file) => ({
+    type: "copy",
+    source: file,
+    destination: getRootRelativeDestination(file, rootPath)
+  }));
+  console.log("[Helldivers2ReShadeModInstaller]", {
+    preset,
+    rootPath,
+    files,
+    instructions
+  });
+  return { instructions, modType: RESHADE_ID };
 }
 
 // ../../utils/shared-utils/dist/json.js
@@ -910,6 +937,7 @@ async function main(context) {
   registerModType(context, SOUND_PATCH_ID, 90, PATCH_PATH, SOUND_PATCH_NAME);
   registerModType(context, DATA_ID, 80, DATA_PATH, DATA_NAME);
   registerModType(context, STREAM_ID, 70, STREAM_PATH, STREAM_NAME);
+  registerModType(context, RESHADE_ID, 60, BINARIES_PATH, RESHADE_NAME);
   context.registerInstaller(PATCH_ID, 27, testPatch, (files, stagingPath, options) => installPatchMulti(context, files, {
     ...options || {},
     stagingPath: typeof stagingPath === "string" ? stagingPath : ""
@@ -920,6 +948,7 @@ async function main(context) {
   }));
   context.registerInstaller(DATA_ID, 25, testDlbin, installDlbin);
   context.registerInstaller(STREAM_ID, 31, testStream, installStream);
+  context.registerInstaller(RESHADE_ID, 32, testReshade, installReshade);
   registerPatchNormalizeHooks(context);
   return true;
 }
