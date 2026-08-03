@@ -17,6 +17,9 @@ export const BINARIES_ID = 'helldivers2-binaries';
 export const BINARIES_NAME = 'Binaries (Engine Injector)';
 export const BINARIES_PATH = 'bin';
 
+export const RESHADE_ID = 'helldivers2-reshade';
+export const RESHADE_NAME = 'ReShade Preset';
+
 export const PATCH_ID = 'helldivers2-patch--MergedMods--This-is-fine--Ignore-this--SELECT-APPLY-CHANGES--DO-NOT-ENABLE';
 export const PATCH_NAME = 'Data Patch (.patch0)';
 export const PATCH_PATH = 'data';
