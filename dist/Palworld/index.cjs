@@ -45,6 +45,7 @@ var UNREAL_PAK_EXE = "UnrealPak.exe";
 var PAK_EXTENSIONS = [".pak", ".utoc", ".ucas"];
 var LUA_EXTENSIONS = [".lua"];
 var ROOT_DIRECTORIES = ["Engine", "Pal", "Resources"];
+var PAL_ROOT_DIRECTORIES = ["Binaries", "Content", "Plugins"];
 var IGNORE_CONFLICT_FILES = ["enabled.txt", "ue4sslogicmod.info", ".ue4sslogicmod", ".logicmod"];
 var MOD_TYPE_UE4SS = `${GAME_ID}-ue4ss`;
 var MOD_TYPE_UNREAL_PAK_TOOL = `${GAME_ID}-unreal-pak-tool`;
@@ -446,7 +447,7 @@ function testLua(files, gameId) {
 function testRoot(files, gameId) {
   const supported = Number(gameId) === 1623730 && files.some((file) => {
     const first = splitArchivePath(file)[0] || "";
-    return ROOT_DIRECTORIES.some((dir) => dir.toLowerCase() === first.toLowerCase());
+    return [...ROOT_DIRECTORIES, ...PAL_ROOT_DIRECTORIES].some((dir) => dir.toLowerCase() === first.toLowerCase());
   });
   return { supported, requiredFiles: [] };
 }
@@ -570,7 +571,7 @@ function installRoot(files) {
   const instructions = files.filter(isFileLike).map((file) => ({
     type: "copy",
     source: file,
-    destination: normalizeArchivePath(file)
+    destination: PAL_ROOT_DIRECTORIES.some((dir) => dir.toLowerCase() === (splitArchivePath(file)[0] || "").toLowerCase()) ? archiveJoin("Pal", normalizeArchivePath(file)) : normalizeArchivePath(file)
   }));
   return { instructions };
 }

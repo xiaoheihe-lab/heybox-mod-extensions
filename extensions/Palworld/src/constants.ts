@@ -22,6 +22,7 @@ export const UNREAL_PAK_EXE = 'UnrealPak.exe'
 export const PAK_EXTENSIONS = ['.pak', '.utoc', '.ucas']
 export const LUA_EXTENSIONS = ['.lua']
 export const ROOT_DIRECTORIES = ['Engine', 'Pal', 'Resources']
+export const PAL_ROOT_DIRECTORIES = ['Binaries', 'Content', 'Plugins']
 export const IGNORE_CONFLICT_FILES = ['enabled.txt', 'ue4sslogicmod.info', '.ue4sslogicmod', '.logicmod']
 
 export const MOD_TYPE_UE4SS = `${GAME_ID}-ue4ss`
