@@ -1,0 +1,19 @@
+{
+  "name": "@heybox-mod-extensions/cyberpunk2077",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "build": "pnpm --dir ../../utils/fomod-utils run build && node ../../internal/build/build.mjs . --local",
+    "build:extension": "pnpm --dir ../../utils/fomod-utils run build && node ../../internal/build/build.mjs .",
+    "lint": "pnpm --dir ../../utils/fomod-utils run lint && tsc --noEmit",
+    "test": "pnpm --dir ../../utils/fomod-utils run test && tsc -p test/tsconfig.json --noEmit && node test/run-tests.mjs"
+  },
+  "dependencies": {
+    "@heybox-mod-extensions/fomod-utils": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "heybox-mod-api": "1.9.0",
+    "typescript": "^5.7.0"
+  }
+}

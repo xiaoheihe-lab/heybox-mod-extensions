@@ -12,6 +12,22 @@ importers:
         specifier: ^5.7.0
         version: 5.9.3
 
+  extensions/Cyberpunk2077:
+    dependencies:
+      '@heybox-mod-extensions/fomod-utils':
+        specifier: workspace:*
+        version: link:../../utils/fomod-utils
+    devDependencies:
+      '@types/node':
+        specifier: ^22.0.0
+        version: 22.20.1
+      heybox-mod-api:
+        specifier: 1.9.0
+        version: 1.9.0
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
+
   extensions/DarkestDungeon:
     devDependencies:
       heybox-mod-api:
@@ -205,6 +221,18 @@ importers:
         specifier: ^5.7.0
         version: 5.9.3
 
+  utils/fomod-utils:
+    devDependencies:
+      '@types/node':
+        specifier: ^22.0.0
+        version: 22.20.1
+      heybox-mod-api:
+        specifier: 1.9.0
+        version: 1.9.0
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
+
   utils/shared-utils:
     devDependencies:
       typescript:
@@ -369,6 +397,9 @@ packages:
     cpu: [x64]
     os: [win32]
 
+  '@types/node@22.20.1':
+    resolution: {integrity: sha512-EANqOCF9QFyra+4pfxUcX9STKJpCLjMbObVzljIJomAWSnuSIEAvyzEU53GaajbXJEgdh0iEcPL+DGvpUd4k1Q==}
+
   esbuild@0.25.12:
     resolution: {integrity: sha512-bbPBYYrtZbkt6Os6FiTLCTFxvq4tt3JKall1vRwshA3fdVztsLAatFaZobhkBC8/BrPetoa0oksYoKXoG4ryJg==}
     engines: {node: '>=18'}
@@ -390,6 +421,9 @@ packages:
     resolution: {integrity: sha512-jl1vZzPDinLr9eUt3J/t7V6FgNEw9QjvBPdysz9KfQDD41fQrC2Y4vKQdiaUpFT4bXlb1RHhLpp8wtm6M5TgSw==}
     engines: {node: '>=14.17'}
     hasBin: true
+
+  undici-types@6.21.0:
+    resolution: {integrity: sha512-iwDZqg0QAGrg9Rav5H4n0M64c3mkR59cJ6wQp+7C4nI0gsmExaedaYLNO44eT4AtBBwjbTiGPMlt2Md0T9H9JQ==}
 
 snapshots:
 
@@ -471,6 +505,10 @@ snapshots:
   '@esbuild/win32-x64@0.25.12':
     optional: true
 
+  '@types/node@22.20.1':
+    dependencies:
+      undici-types: 6.21.0
+
   esbuild@0.25.12:
     optionalDependencies:
       '@esbuild/aix-ppc64': 0.25.12
@@ -509,3 +547,5 @@ snapshots:
   heybox-mod-api@1.9.0: {}
 
   typescript@5.9.3: {}
+
+  undici-types@6.21.0: {}
