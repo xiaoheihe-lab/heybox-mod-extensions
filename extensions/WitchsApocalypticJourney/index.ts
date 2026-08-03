@@ -1,5 +1,6 @@
 // @ts-nocheck
 import type { IExtensionContext } from 'heybox-mod-api';
+import { formatJSONPlainText } from '@heybox-mod-extensions/shared-utils/json';
 
 const fs = require('fs');
 const path = require('path');
@@ -75,7 +76,9 @@ function readModName(stagingPath: string, configPath: string): string {
   }
 
   const configFullPath = path.join(stagingPath, configPath);
-  const config = JSON.parse(fs.readFileSync(configFullPath, 'utf8'));
+  const configText = fs.readFileSync(configFullPath, 'utf8');
+  const normalizedConfigText = formatJSONPlainText(configText);
+  const config = JSON.parse(normalizedConfigText);
   if (typeof config?.ModName !== 'string' || !config.ModName.trim()) {
     throw new Error('ModConfig.json must contain a non-empty ModName field');
   }
