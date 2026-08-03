@@ -37,6 +37,11 @@ export async function mapRedmods(
     }
   }
 
+  console.log('[Cyberpunk2077][REDmod] REDmod install instructions created', {
+    packageName: input.pkg.packageName,
+    redmods: metadataFromRoots(roots),
+  })
+
   return [
     { type: 'attribute', key: 'cyberpunkRedmodInfo', value: metadataFromRoots(roots) },
     { type: 'attribute', key: 'cyberpunkRedmodRequiresDeploy', value: true },

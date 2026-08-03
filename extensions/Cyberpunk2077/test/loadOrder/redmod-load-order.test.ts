@@ -76,12 +76,12 @@ test('REDmod modlist keeps UI order, filters disabled entries, and uses semantic
   const entries = deserializeRedmodLoadOrder(context())
   const ordered = [entries[2], entries[0], entries[1]]
   assert.deepEqual(getEnabledRedmodNames(ordered), ['Middle'])
-  assert.deepEqual(buildRedmodDeployArgs('D:/Games/Cyberpunk 2077', 'D:/Games/Cyberpunk 2077/V2077/modlist.txt'), [
+  assert.deepEqual(buildRedmodDeployArgs('D:/Games/Cyberpunk 2077', 'D:/Games/Cyberpunk 2077/H2077/modlist.txt'), [
     'deploy',
     '-force',
     '-root=D:/Games/Cyberpunk 2077',
     `-rttiSchemaFile=${path.join('D:/Games/Cyberpunk 2077', 'tools/redmod/metadata.json')}`,
-    '-modlist=D:/Games/Cyberpunk 2077/V2077/modlist.txt',
+    '-modlist=D:/Games/Cyberpunk 2077/H2077/modlist.txt',
   ])
   assert.equal(getEnabledRedmodNames([]).join('\r\n'), '')
 })
@@ -96,7 +96,7 @@ test('REDmod deployment writes enabled-only CRLF modlist and diagnostics before 
     runRedmod: async (executable, gamePath, modlistPath) => { runs.push({ executable, gamePath, modlistPath }) },
   })
   assert.equal(writes[0].data, 'Middle')
-  assert.match(writes[1].path.replace(/\\/g, '/'), /V2077\/Load Order\/heybox-managed\.json$/)
+  assert.match(writes[1].path.replace(/\\/g, '/'), /H2077\/Load Order\/heybox-managed\.json$/)
   assert.deepEqual(JSON.parse(writes[1].data).entries.map((entry: any) => entry.id), entries.map((entry) => entry.id))
   assert.equal(runs.length, 1)
   assert.match(runs[0].executable.replace(/\\/g, '/'), /tools\/redmod\/bin\/redMod\.exe$/)
@@ -119,7 +119,7 @@ test('REDmod deployment still writes an empty modlist before reporting missing D
 test('REDmod atomic writer replaces an existing file without leaving temp files', async () => {
   const root = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'cyberpunk-redmod-write-'))
   try {
-    const target = path.join(root, 'V2077', 'modlist.txt')
+    const target = path.join(root, 'H2077', 'modlist.txt')
     await atomicWrite(target, 'First')
     await atomicWrite(target, 'Second')
     assert.equal(await fs.promises.readFile(target, 'utf8'), 'Second')

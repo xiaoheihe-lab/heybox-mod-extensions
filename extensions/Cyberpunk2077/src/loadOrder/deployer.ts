@@ -5,10 +5,11 @@ import { REDMOD_DEPLOY_EXE, REDMOD_METADATA } from '../constants'
 import type { LoadOrderContext, LoadOrderEntry } from './protocol'
 import { getEnabledRedmodNames, REDMOD_LOAD_ORDER_PROVIDER_ID } from './provider'
 
-const V2077_DIR = 'V2077'
-const LOAD_ORDER_DIR = path.join(V2077_DIR, 'Load Order')
-const MODLIST_PATH = path.join(V2077_DIR, 'modlist.txt')
+const H2077_DIR = 'H2077'
+const LOAD_ORDER_DIR = path.join(H2077_DIR, 'Load Order')
+const MODLIST_PATH = path.join(H2077_DIR, 'modlist.txt')
 const LOAD_ORDER_PATH = path.join(LOAD_ORDER_DIR, 'heybox-managed.json')
+let atomicWriteSequence = 0
 
 export class RedmodDeploymentError extends Error {
   constructor(public readonly code: string, message: string) {
@@ -27,7 +28,9 @@ async function fileExists(filePath: string): Promise<boolean> {
 
 export async function atomicWrite(filePath: string, data: string): Promise<void> {
   await fs.promises.mkdir(path.dirname(filePath), { recursive: true })
-  const temporaryPath = `${filePath}.${process.pid}.${Date.now()}.tmp`
+  atomicWriteSequence += 1
+  const randomSuffix = Math.random().toString(36).slice(2)
+  const temporaryPath = `${filePath}.${Date.now()}.${atomicWriteSequence}.${randomSuffix}.tmp`
   try {
     await fs.promises.writeFile(temporaryPath, data, 'utf8')
     await fs.promises.rename(temporaryPath, filePath)
@@ -99,7 +102,19 @@ export async function serializeAndDeployRedmods(
       'Steam REDmod DLC 未安装或不完整；Load Order 已保存，但尚未运行 redMod.exe。',
     )
   }
-  await dependencies.runRedmod(executable, gamePath, modlistPath)
+  const enabledRedmods = getEnabledRedmodNames(entries)
+  console.log('[Cyberpunk2077][REDmod] Starting REDmod compilation', {
+    enabledRedmods,
+    executable,
+    args: buildRedmodDeployArgs(gamePath, modlistPath),
+  })
+  try {
+    await dependencies.runRedmod(executable, gamePath, modlistPath)
+    console.log('[Cyberpunk2077][REDmod] REDmod compilation completed', { enabledRedmods })
+  } catch (error) {
+    console.error('[Cyberpunk2077][REDmod] REDmod compilation failed', { enabledRedmods, error })
+    throw error
+  }
 }
 
 export async function prepareRedmodDirectories(gamePath: string): Promise<void> {

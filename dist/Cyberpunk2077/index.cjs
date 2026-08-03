@@ -42,6 +42,8 @@ var NEXUS_DOMAIN = "cyberpunk2077";
 var REDMOD_PRELAUNCHER = "REDprelauncher.exe";
 var REDMOD_DEPLOY_EXE = "tools/redmod/bin/redMod.exe";
 var REDMOD_METADATA = "tools/redmod/metadata.json";
+var REDMOD_STEAM_APP_ID = 2060310;
+var REDMOD_STEAM_HEADER_IMAGE = "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/2060310/header.jpg?t=1686740123";
 var typeId = (name) => `${GAME_ID}-${name}`;
 var MOD_TYPE = {
   fomod: typeId("fomod"),
@@ -135,9 +137,9 @@ var PATHS = {
   iniConfig: "engine/config/platform/pc",
   reshade: "bin/x64",
   redmods: "mods",
-  extras: "V2077/mod-extra-files",
+  extras: "H2077/mod-extra-files",
   cyberCat: "CyberCAT",
-  cyberCatPresets: "V2077/presets/cybercat",
+  cyberCatPresets: "H2077/presets/cybercat",
   appearancePresets: "bin/x64/plugins/cyber_engine_tweaks/mods/AppearanceChangeUnlocker/character-presets"
 };
 var XML_PROTECTED_NAMES = /* @__PURE__ */ new Set([
@@ -161,28 +163,6 @@ var RED4EXT_RESERVED_DLLS = /* @__PURE__ */ new Set([
   "vcruntime140_cor3.dll",
   "wpfgfx_cor3.dll"
 ]);
-
-// src/ui.ts
-var INSTALL_CANCELLED = "Cyberpunk 2077 mod installation cancelled by user";
-async function confirmInstall(context, title, content, confirmText = "\u7EE7\u7EED\u5B89\u88C5") {
-  const response = await context.api.util.ui.request({
-    type: "mod_install_confirmation",
-    title,
-    content,
-    confirm: { text: confirmText, type: "primary", visible: true },
-    cancel: { text: "\u53D6\u6D88", type: "cancel", visible: true }
-  }, { timeoutMs: 10 * 60 * 1e3 });
-  if (!response?.confirmed) throw new Error(INSTALL_CANCELLED);
-}
-function notify(context, title, content, variant = "warning") {
-  context.api.util.ui.notify({
-    type: "cyberpunk2077_extension_notice",
-    display: "toast",
-    variant,
-    title,
-    content
-  });
-}
 
 // src/loadOrder/deployer.ts
 var import_fs = __toESM(require("fs"));
@@ -248,10 +228,11 @@ function getEnabledRedmodNames(entries) {
 }
 
 // src/loadOrder/deployer.ts
-var V2077_DIR = "V2077";
-var LOAD_ORDER_DIR = import_path2.default.join(V2077_DIR, "Load Order");
-var MODLIST_PATH = import_path2.default.join(V2077_DIR, "modlist.txt");
+var H2077_DIR = "H2077";
+var LOAD_ORDER_DIR = import_path2.default.join(H2077_DIR, "Load Order");
+var MODLIST_PATH = import_path2.default.join(H2077_DIR, "modlist.txt");
 var LOAD_ORDER_PATH = import_path2.default.join(LOAD_ORDER_DIR, "heybox-managed.json");
+var atomicWriteSequence = 0;
 var RedmodDeploymentError = class extends Error {
   constructor(code, message) {
     super(message);
@@ -268,7 +249,9 @@ async function fileExists(filePath) {
 }
 async function atomicWrite(filePath, data) {
   await import_fs.default.promises.mkdir(import_path2.default.dirname(filePath), { recursive: true });
-  const temporaryPath = `${filePath}.${process.pid}.${Date.now()}.tmp`;
+  atomicWriteSequence += 1;
+  const randomSuffix = Math.random().toString(36).slice(2);
+  const temporaryPath = `${filePath}.${Date.now()}.${atomicWriteSequence}.${randomSuffix}.tmp`;
   try {
     await import_fs.default.promises.writeFile(temporaryPath, data, "utf8");
     await import_fs.default.promises.rename(temporaryPath, filePath);
@@ -330,7 +313,19 @@ async function serializeAndDeployRedmods(entries, context, dependencies = defaul
       "Steam REDmod DLC \u672A\u5B89\u88C5\u6216\u4E0D\u5B8C\u6574\uFF1BLoad Order \u5DF2\u4FDD\u5B58\uFF0C\u4F46\u5C1A\u672A\u8FD0\u884C redMod.exe\u3002"
     );
   }
-  await dependencies.runRedmod(executable, gamePath, modlistPath);
+  const enabledRedmods = getEnabledRedmodNames(entries);
+  console.log("[Cyberpunk2077][REDmod] Starting REDmod compilation", {
+    enabledRedmods,
+    executable,
+    args: buildRedmodDeployArgs(gamePath, modlistPath)
+  });
+  try {
+    await dependencies.runRedmod(executable, gamePath, modlistPath);
+    console.log("[Cyberpunk2077][REDmod] REDmod compilation completed", { enabledRedmods });
+  } catch (error) {
+    console.error("[Cyberpunk2077][REDmod] REDmod compilation failed", { enabledRedmods, error });
+    throw error;
+  }
 }
 async function prepareRedmodDirectories(gamePath) {
   if (!gamePath) return;
@@ -587,6 +582,9 @@ async function extractFomodRedmodAttributes(contextValue, context) {
       true
     );
     for (const root of roots) validateRedmodRoot(pkg, root);
+    console.log("[Cyberpunk2077][REDmod] FOMOD selected REDmod content", {
+      redmods: metadataFromRoots(roots)
+    });
     return {
       cyberpunkRedmodInfo: metadataFromRoots(roots),
       cyberpunkRedmodRequiresDeploy: roots.length > 0
@@ -599,6 +597,28 @@ async function extractFomodRedmodAttributes(contextValue, context) {
 function registerFomodRedmodAttributeExtractor(contextValue) {
   const context = contextValue;
   context.registerPostInstallerAttributeExtractor(100, (payload) => extractFomodRedmodAttributes(contextValue, payload));
+}
+
+// src/ui.ts
+var INSTALL_CANCELLED = "Cyberpunk 2077 mod installation cancelled by user";
+async function confirmInstall(context, title, content, confirmText = "\u7EE7\u7EED\u5B89\u88C5") {
+  const response = await context.api.util.ui.request({
+    type: "mod_install_confirmation",
+    title,
+    content,
+    confirm: { text: confirmText, type: "primary", visible: true },
+    cancel: { text: "\u53D6\u6D88", type: "cancel", visible: true }
+  }, { timeoutMs: 10 * 60 * 1e3 });
+  if (!response?.confirmed) throw new Error(INSTALL_CANCELLED);
+}
+function notify(context, title, content, variant = "warning") {
+  context.api.util.ui.notify({
+    type: "cyberpunk2077_extension_notice",
+    display: "toast",
+    variant,
+    title,
+    content
+  });
 }
 
 // src/launchOptions/arguments.ts
@@ -741,7 +761,7 @@ function registerRedmodLoadOrder(contextValue) {
   context.registerExtensionAction(GAME_ID, "deployRedmods", () => context.api.loadOrder.deploy(REDMOD_LOAD_ORDER_PROVIDER_ID));
 }
 
-// src/game.ts
+// src/requirements/redmod.ts
 async function fileExists2(context, filePath) {
   try {
     return Boolean((await context.api.util.fs.stat(filePath))?.isFile);
@@ -749,11 +769,11 @@ async function fileExists2(context, filePath) {
     return false;
   }
 }
-async function findGamePath(context) {
-  return (await context.api.util.GameStoreHelper.findByAppId(GAME_ID))?.gamePath;
+async function resolveGamePath(context) {
+  return String((await context.api.util.GameStoreHelper.findByAppId(GAME_ID))?.gamePath || "");
 }
 async function getRedmodStatus(context, gamePath) {
-  const resolvedGamePath = String(gamePath || await findGamePath(context) || "");
+  const resolvedGamePath = String(gamePath || await resolveGamePath(context));
   const join = context.api.util.path.join;
   const checks = resolvedGamePath ? await Promise.all([
     fileExists2(context, join(resolvedGamePath, REDMOD_PRELAUNCHER)),
@@ -761,7 +781,7 @@ async function getRedmodStatus(context, gamePath) {
     fileExists2(context, join(resolvedGamePath, REDMOD_METADATA))
   ]) : [false, false, false];
   return {
-    installed: checks.every(Boolean),
+    installed: checks[1] && checks[2],
     gamePath: resolvedGamePath,
     files: {
       prelauncher: checks[0],
@@ -770,15 +790,32 @@ async function getRedmodStatus(context, gamePath) {
     }
   };
 }
+function createRedmodSteamPrerequisite(context) {
+  return {
+    id: "cyberpunk-redmod",
+    steamAppId: REDMOD_STEAM_APP_ID,
+    presentation: {
+      title: "\u5B89\u88C5 REDmod",
+      content: "REDmod \u662F Cyberpunk 2077 \u7684\u514D\u8D39\u5B98\u65B9 Mod \u5DE5\u5177 DLC\u3002\u8BF7\u5148\u5728 Steam \u4E2D\u5B8C\u6210\u5B89\u88C5\uFF0C\u7136\u540E\u8FD4\u56DE\u6B64\u5904\u91CD\u65B0\u68C0\u67E5\u3002\u666E\u901A\u975E REDmod \u6A21\u7EC4\u4ECD\u53EF\u7EE7\u7EED\u7BA1\u7406\u3002",
+      imageUrl: REDMOD_STEAM_HEADER_IMAGE,
+      installButtonText: "\u524D\u5F80 Steam \u5B89\u88C5",
+      openingText: "\u6B63\u5728\u6253\u5F00 Steam\u2026",
+      openFailedText: "\u65E0\u6CD5\u6253\u5F00 Steam \u5546\u5E97\u9875\u9762\uFF0C\u8BF7\u7A0D\u540E\u91CD\u8BD5\u3002",
+      recheckButtonText: "\u91CD\u65B0\u68C0\u67E5",
+      checkingText: "\u6B63\u5728\u68C0\u67E5 REDmod\u2026",
+      notFoundText: "\u6682\u672A\u68C0\u6D4B\u5230 REDmod\u3002\u8BF7\u786E\u8BA4 Steam \u5DF2\u5B8C\u6210\u4E0B\u8F7D\u548C\u5B89\u88C5\uFF0C\u7136\u540E\u91CD\u65B0\u68C0\u67E5\u3002",
+      checkFailedText: "\u68C0\u67E5 REDmod \u65F6\u53D1\u751F\u9519\u8BEF\uFF0C\u8BF7\u7A0D\u540E\u91CD\u8BD5\u3002"
+    },
+    check: async ({ gamePath }) => (await getRedmodStatus(context, gamePath)).installed
+  };
+}
+
+// src/game.ts
+async function findGamePath(context) {
+  return (await context.api.util.GameStoreHelper.findByAppId(GAME_ID))?.gamePath;
+}
 async function setup(context, gamePath) {
   await prepareRedmodDirectories(gamePath);
-  const status = await getRedmodStatus(context, gamePath);
-  if (status.installed) return;
-  notify(
-    context,
-    "REDmod DLC \u672A\u5B89\u88C5\u6216\u4E0D\u5B8C\u6574",
-    "\u666E\u901A Mod \u4ECD\u53EF\u6B63\u5E38\u7BA1\u7406\uFF1B\u5B89\u88C5 REDmod \u7C7B\u578B\u5185\u5BB9\u524D\uFF0C\u8BF7\u5148\u5728 Steam \u4E2D\u5B89\u88C5\u514D\u8D39\u7684 REDmod DLC\u3002"
-  );
 }
 function registerCyberpunkGame(context) {
   context.registerGame({
@@ -788,6 +825,7 @@ function registerCyberpunkGame(context) {
     executable: EXECUTABLE,
     queryPath: () => findGamePath(context),
     requiredFiles: [EXECUTABLE],
+    steamPrerequisites: [createRedmodSteamPrerequisite(context)],
     setup: async (discovery) => setup(context, String(discovery?.path || discovery?.gamePath || "")),
     environment: { SteamAPPId: String(GAME_ID) },
     details: {
@@ -2189,6 +2227,10 @@ async function mapRedmods(input, mapped, canonicalOnly = false) {
       mapInstruction(mapped, file, `${root.destinationRoot}/${relative}`);
     }
   }
+  console.log("[Cyberpunk2077][REDmod] REDmod install instructions created", {
+    packageName: input.pkg.packageName,
+    redmods: metadataFromRoots(roots)
+  });
   return [
     { type: "attribute", key: "cyberpunkRedmodInfo", value: metadataFromRoots(roots) },
     { type: "attribute", key: "cyberpunkRedmodRequiresDeploy", value: true }

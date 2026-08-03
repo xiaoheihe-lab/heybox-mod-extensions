@@ -69,6 +69,9 @@ export async function extractFomodRedmodAttributes(
       true,
     )
     for (const root of roots) validateRedmodRoot(pkg, root)
+    console.log('[Cyberpunk2077][REDmod] FOMOD selected REDmod content', {
+      redmods: metadataFromRoots(roots),
+    })
     return {
       cyberpunkRedmodInfo: metadataFromRoots(roots),
       cyberpunkRedmodRequiresDeploy: roots.length > 0,

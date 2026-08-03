@@ -6,6 +6,8 @@ export const NEXUS_DOMAIN = 'cyberpunk2077'
 export const REDMOD_PRELAUNCHER = 'REDprelauncher.exe'
 export const REDMOD_DEPLOY_EXE = 'tools/redmod/bin/redMod.exe'
 export const REDMOD_METADATA = 'tools/redmod/metadata.json'
+export const REDMOD_STEAM_APP_ID = 2060310
+export const REDMOD_STEAM_HEADER_IMAGE = 'https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/2060310/header.jpg?t=1686740123'
 
 const typeId = (name: string) => `${GAME_ID}-${name}`
 
@@ -95,9 +97,9 @@ export const PATHS = {
   iniConfig: 'engine/config/platform/pc',
   reshade: 'bin/x64',
   redmods: 'mods',
-  extras: 'V2077/mod-extra-files',
+  extras: 'H2077/mod-extra-files',
   cyberCat: 'CyberCAT',
-  cyberCatPresets: 'V2077/presets/cybercat',
+  cyberCatPresets: 'H2077/presets/cybercat',
   appearancePresets: 'bin/x64/plugins/cyber_engine_tweaks/mods/AppearanceChangeUnlocker/character-presets',
 } as const
 

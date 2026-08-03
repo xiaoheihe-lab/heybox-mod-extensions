@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import path from 'node:path'
 import test from 'node:test'
-import { GAME_ID, MOD_TYPE } from '../src/constants'
+import { GAME_ID, MOD_TYPE, REDMOD_STEAM_APP_ID, REDMOD_STEAM_HEADER_IMAGE } from '../src/constants'
 import { getRedmodStatus, registerCyberpunkGame } from '../src/game'
 import { installCyberpunkPackage, testCyberpunkPackage } from '../src/installers/pipeline'
 import { registerCyberpunkModTypes } from '../src/modTypes'
@@ -34,6 +34,13 @@ test('Cyberpunk 2077 general installer and registration regressions', async () =
   assert.equal(registrations.games[0].id, GAME_ID)
   assert.equal(registrations.games[0].executable, 'bin/x64/Cyberpunk2077.exe')
   assert.equal(registrations.games[0].details.supportsSymlinks, false)
+  assert.equal(registrations.games[0].steamPrerequisites.length, 1)
+  const redmodPrerequisite = registrations.games[0].steamPrerequisites[0]
+  assert.equal(redmodPrerequisite.id, 'cyberpunk-redmod')
+  assert.equal(redmodPrerequisite.steamAppId, REDMOD_STEAM_APP_ID)
+  assert.equal(redmodPrerequisite.presentation.imageUrl, REDMOD_STEAM_HEADER_IMAGE)
+  assert.equal(redmodPrerequisite.presentation.installButtonText, '前往 Steam 安装')
+  assert.equal(redmodPrerequisite.presentation.recheckButtonText, '安装完成，重新检查')
   assert.equal(registrations.installers.length, 2)
   assert.deepEqual(registrations.installers[0], { id: MOD_TYPE.fomod, priority: 100 })
   assert.deepEqual(registrations.installers[1], { id: MOD_TYPE.pipeline, priority: 30 })
@@ -79,7 +86,7 @@ test('Cyberpunk 2077 general installer and registration regressions', async () =
   assert.equal(multi.modTypeId, MOD_TYPE.multiType)
   assert.ok(multi.instructions.some((item: any) => item.destination === 'archive/pc/mod/cool.archive'))
   assert.ok(multi.instructions.some((item: any) => item.destination === 'bin/x64/plugins/cyber_engine_tweaks/mods/CoolMod/init.lua'))
-  assert.ok(multi.instructions.some((item: any) => item.destination === 'V2077/mod-extra-files/Combo/README.md'))
+  assert.ok(multi.instructions.some((item: any) => item.destination === 'H2077/mod-extra-files/Combo/README.md'))
 
   const red4ext = await installCyberpunkPackage(fakeContext().context, [
     'CoolPlugin.dll',
@@ -148,5 +155,12 @@ test('Cyberpunk 2077 general installer and registration regressions', async () =
     path.join(gamePath, 'tools/redmod/metadata.json'),
   ]
   assert.equal((await getRedmodStatus(fakeContext({}, redmodFiles).context, gamePath)).installed, true)
+  assert.equal((await getRedmodStatus(fakeContext({}, redmodFiles.slice(1)).context, gamePath)).installed, true)
   assert.equal((await getRedmodStatus(fakeContext({}, redmodFiles.slice(0, 2)).context, gamePath)).installed, false)
+  assert.equal(await redmodPrerequisite.check({
+    appid: GAME_ID,
+    gameId: GAME_ID,
+    gamePath,
+    reason: 'manual-recheck',
+  }), false)
 })

@@ -112,7 +112,7 @@ export const INI_RESHADE_FIXTURES: InstallerFixture[] = [
       },
       {
         source: 'FancyMod/README.md',
-        destination: 'V2077/mod-extra-files/FancyMod/README.md',
+        destination: 'H2077/mod-extra-files/FancyMod/README.md',
       },
     ],
   },

@@ -14,7 +14,7 @@
 - [x] 提供可编辑的 REDmod 加载顺序。
 - [x] 按当前 Heybox 用户及 appid 作用域持久化加载顺序。
 - [x] 禁用 REDmod 后保留位置，再次启用时恢复。
-- [x] 生成 `V2077/modlist.txt` 时严格使用用户配置顺序。
+- [x] 生成 `H2077/modlist.txt` 时严格使用用户配置顺序。
 - [x] 处理新增、删除、重命名及失效 REDmod 条目。
 - [x] 明确多类型 Mod 中 REDmod 部分参与排序的规则。
 - [x] 补充排序、持久化、禁用恢复及部署结果测试。
@@ -24,6 +24,7 @@
 ## P1：启动与外部工具集成
 
 - [x] 首次成功部署非空 REDmod 后，为所有缺少参数的本地 Steam 用户保留原启动项并追加 `-modded`；取消后下次部署重试，且永不自动删除该参数。
+- [x] 进入游戏 Mod 管理页时检查 REDmod Steam DLC；缺失时使用通用 Steam 前置弹窗引导安装并支持手动重新检查。
 - [ ] 评估并接入 REDlauncher 工具入口。
 - [ ] 评估并接入手动 REDdeploy 操作或工具入口。
 - [ ] 为 CyberCAT 提供可启动的工具入口，而不只是安装后通知。
@@ -66,7 +67,6 @@
 
 - 传统 Archive Mod 自动转换为 REDmod。
 - GOG 和 Epic 商店支持。
-- REDmod DLC 的 Steam 安装引导。
 
 ## 有意保留的差异（不作为 TODO）
 
