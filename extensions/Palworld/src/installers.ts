@@ -10,6 +10,7 @@ import {
   MOD_TYPE_PAK,
   PAK_EXTENSIONS,
   PAK_MODS_PATH,
+  PAL_ROOT_DIRECTORIES,
   PAL_WIN64_PATH,
   ROOT_DIRECTORIES,
   UE4SS_DLL,
@@ -95,7 +96,7 @@ export function testLua(files: string[], gameId: number | string) {
 export function testRoot(files: string[], gameId: number | string) {
   const supported = Number(gameId) === 1623730 && files.some((file) => {
     const first = splitArchivePath(file)[0] || ''
-    return ROOT_DIRECTORIES.some((dir) => dir.toLowerCase() === first.toLowerCase())
+    return [...ROOT_DIRECTORIES, ...PAL_ROOT_DIRECTORIES].some((dir) => dir.toLowerCase() === first.toLowerCase())
   })
   return { supported, requiredFiles: [] }
 }
@@ -251,7 +252,9 @@ export function installRoot(files: string[]) {
     .map((file) => ({
       type: 'copy',
       source: file,
-      destination: normalizeArchivePath(file),
+      destination: PAL_ROOT_DIRECTORIES.some((dir) => dir.toLowerCase() === (splitArchivePath(file)[0] || '').toLowerCase())
+        ? archiveJoin('Pal', normalizeArchivePath(file))
+        : normalizeArchivePath(file),
     }))
   return { instructions }
 }

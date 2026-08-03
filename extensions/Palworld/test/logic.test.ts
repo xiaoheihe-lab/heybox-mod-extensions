@@ -5,6 +5,7 @@ import {
   installLua,
   installUe4ss,
   installPak,
+  installRoot,
   installUnrealPakTool,
   testLua,
   testPak,
@@ -85,7 +86,23 @@ async function main() {
   ], 1623730).supported, true)
 
   assert.equal(testRoot(['Pal/Content/Paks/Foo.pak'], 1623730).supported, true)
+  assert.equal(testRoot(['Binaries/Win64/ue4ss/Mods/Cool/Scripts/main.lua'], 1623730).supported, true)
+  assert.equal(testRoot(['Content/Paks/LogicMods/Cool.pak'], 1623730).supported, true)
+  assert.equal(testRoot(['Plugins/Cool/Cool.uplugin'], 1623730).supported, true)
   assert.equal(testRoot(['Random/Foo.pak'], 1623730).supported, false)
+
+  const rootInstall = installRoot([
+    'Binaries/Win64/ue4ss/Mods/Cool/Scripts/main.lua',
+    'Content/Paks/LogicMods/Cool.pak',
+    'Plugins/Cool/Cool.uplugin',
+    'Pal/Content/Existing.pak',
+  ])
+  assert.deepEqual(rootInstall.instructions, [
+    { type: 'copy', source: 'Binaries/Win64/ue4ss/Mods/Cool/Scripts/main.lua', destination: 'Pal/Binaries/Win64/ue4ss/Mods/Cool/Scripts/main.lua' },
+    { type: 'copy', source: 'Content/Paks/LogicMods/Cool.pak', destination: 'Pal/Content/Paks/LogicMods/Cool.pak' },
+    { type: 'copy', source: 'Plugins/Cool/Cool.uplugin', destination: 'Pal/Plugins/Cool/Cool.uplugin' },
+    { type: 'copy', source: 'Pal/Content/Existing.pak', destination: 'Pal/Content/Existing.pak' },
+  ])
 
   const toolInstall = installUnrealPakTool(['bin/UnrealPak.exe', 'bin/Tool.dll'])
   assert.deepEqual(toolInstall.instructions, [
