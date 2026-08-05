@@ -25,6 +25,19 @@ importers:
         specifier: ^5.7.0
         version: 5.9.3
 
+  extensions/ClairObscurExpedition33:
+    dependencies:
+      '@heybox-mod-extensions/fomod-utils':
+        specifier: workspace:*
+        version: link:../../utils/fomod-utils
+    devDependencies:
+      heybox-mod-api:
+        specifier: 1.9.0
+        version: 1.9.0
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
+
   extensions/Cyberpunk2077:
     dependencies:
       '@heybox-mod-extensions/fomod-utils':
