@@ -21,6 +21,10 @@ It intentionally does not support Vortex's Config or Save mod types because thos
 
 Specialized installers defer every archive containing `fomod/ModuleConfig.xml` to the shared FOMOD installer.
 
+## UE4SS prerequisite
+
+UE4SS is a managed game prerequisite (platform Mod ID `8577`). During game setup and before enabling dependent Mods, the extension requires both `Sandfall/Binaries/Win64/dwmapi.dll` and `Sandfall/Binaries/Win64/ue4ss/UE4SS.dll`. When either is missing, it returns the standard required-Mod warning and directs the client to install/enable that prerequisite.
+
 ## IO Store file selection and load order
 
 When an archive contains multiple IO Store Mod sets, each Pak/UCAS/UTOC group is selected as one unit so a required sidecar cannot be omitted. Flattened destination filename collisions are rejected.

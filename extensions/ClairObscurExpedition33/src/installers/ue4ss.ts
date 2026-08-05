@@ -1,5 +1,6 @@
 import {
   MOD_TYPE_UE4SS,
+  UE4SS_DLL,
   UE4SS_DWMAPI,
   WIN64_PATH,
 } from '../constants'
@@ -17,10 +18,20 @@ interface Ue4ssAnchor {
 }
 
 export function findUe4ssAnchor(files: string[]): Ue4ssAnchor | null {
-  const anchorFile = files.find((file) => (
-    isArchiveFile(file, files) && archiveBaseName(file).toLowerCase() === UE4SS_DWMAPI
-  ))
-  return anchorFile ? { rootSegments: splitArchivePath(anchorFile).slice(0, -1) } : null
+  for (const anchorFile of files) {
+    if (!isArchiveFile(anchorFile, files) || archiveBaseName(anchorFile).toLowerCase() !== UE4SS_DWMAPI) continue
+    const rootSegments = splitArchivePath(anchorFile).slice(0, -1)
+    const hasNestedUe4ssDll = files.some((file) => {
+      if (!isArchiveFile(file, files)) return false
+      const segments = splitArchivePath(file)
+      return segments.length === rootSegments.length + 2
+        && rootSegments.every((segment, index) => segments[index]?.toLowerCase() === segment.toLowerCase())
+        && segments[rootSegments.length]?.toLowerCase() === 'ue4ss'
+        && segments[rootSegments.length + 1]?.toLowerCase() === UE4SS_DLL.toLowerCase()
+    })
+    if (hasNestedUe4ssDll) return { rootSegments }
+  }
+  return null
 }
 
 export function testUe4ss(files: string[], gameId: number | string) {

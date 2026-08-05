@@ -15,7 +15,7 @@ export async function findGamePath(context: IExtensionContext): Promise<string |
   return game?.gamePath
 }
 
-export function registerGame(context: IExtensionContext): void {
+export function registerGame(context: IExtensionContext, setup?: (discovery: unknown) => Promise<unknown>): void {
   context.registerGame({
     id: GAME_ID,
     name: GAME_NAME,
@@ -23,6 +23,7 @@ export function registerGame(context: IExtensionContext): void {
     executable: EXECUTABLE,
     queryPath: () => findGamePath(context),
     requiredFiles: [EXECUTABLE, GAME_FOLDER],
+    ...(setup ? { setup } : {}),
     environment: {
       SteamAPPId: STEAM_APP_ID,
     },

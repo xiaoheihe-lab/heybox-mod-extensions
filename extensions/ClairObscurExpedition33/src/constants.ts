@@ -13,6 +13,8 @@ export const PAK_MODS_PATH = `${GAME_FOLDER}/Content/Paks/~mods`
 export const LOGIC_MODS_PATH = `${GAME_FOLDER}/Content/Paks/LogicMods`
 
 export const UE4SS_DWMAPI = 'dwmapi.dll'
+export const UE4SS_DLL = 'UE4SS.dll'
+export const UE4SS_REQUIREMENT_MOD_ID = '8577'
 export const PAK_EXTENSIONS = ['.pak', '.ucas', '.utoc'] as const
 export const PAK_EXTENSION = '.pak'
 

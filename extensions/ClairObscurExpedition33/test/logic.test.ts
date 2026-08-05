@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import path from 'node:path'
 import {
   GAME_ID,
   MOD_TYPE_FOMOD,
@@ -6,6 +7,7 @@ import {
   MOD_TYPE_PRIORITY,
   PAK_ATTRIBUTE,
   PAK_LOAD_ORDER_PROVIDER_ID,
+  UE4SS_REQUIREMENT_MOD_ID,
 } from '../src/constants'
 import {
   FALLBACK_INSTALL_CANCELLED,
@@ -34,6 +36,25 @@ import { extractFomodPakAttributes } from '../src/loadOrder/fomod'
 import { registerPakLoadOrder } from '../src/loadOrder'
 import { deserializePakLoadOrder } from '../src/loadOrder/provider'
 import { registerClairObscurExpedition33ModTypes } from '../src/modTypes'
+import { getExtensionRequiredMods, getRequirementItems, getRequirementStatus } from '../src/requirements'
+
+function requirementContext(existingFiles: string[]) {
+  const files = new Set(existingFiles.map((file) => path.normalize(file).toLowerCase()))
+  return {
+    api: {
+      util: {
+        path,
+        GameStoreHelper: { findByAppId: async () => null },
+        fs: {
+          stat: async (target: string) => {
+            if (files.has(path.normalize(target).toLowerCase())) return { isFile: true }
+            throw new Error('ENOENT')
+          },
+        },
+      },
+    },
+  } as any
+}
 
 function selectionContext(response: any) {
   return {
@@ -47,6 +68,8 @@ function selectionContext(response: any) {
 
 async function main() {
   assert.equal(GAME_ID, 1903340)
+  assert.equal(UE4SS_REQUIREMENT_MOD_ID, '8577')
+  assert.deepEqual(getRequirementItems().map((item) => item.modId), ['8577'])
 
   const registeredTypes: Array<{ id: string, priority: number, name: string }> = []
   const registeredInstallers: Array<{ id: string, priority: number }> = []
@@ -109,12 +132,30 @@ async function main() {
     'README.md',
   ]
   assert.equal(testUe4ss(ue4ssFiles, GAME_ID).supported, true)
+  assert.equal(testUe4ss(['UE4SS/dwmapi.dll'], GAME_ID).supported, false)
+  assert.equal(testUe4ss(['UE4SS/dwmapi.dll', 'Other/ue4ss/UE4SS.dll'], GAME_ID).supported, false)
   assert.deepEqual(installUe4ss(ue4ssFiles).instructions, [
     { type: 'copy', source: 'UE4SS/dwmapi.dll', destination: 'Sandfall/Binaries/Win64/dwmapi.dll' },
     { type: 'copy', source: 'UE4SS/ue4ss/UE4SS.dll', destination: 'Sandfall/Binaries/Win64/ue4ss/UE4SS.dll' },
     { type: 'copy', source: 'UE4SS/ue4ss/Mods/mods.txt', destination: 'Sandfall/Binaries/Win64/ue4ss/Mods/mods.txt' },
     { type: 'copy', source: 'UE4SS/LICENSE', destination: 'Sandfall/Binaries/Win64/LICENSE' },
   ])
+
+  const gamePath = path.join('D:', 'Games', 'Expedition33')
+  const win64Path = path.join(gamePath, 'Sandfall/Binaries/Win64')
+  const installedRequirement = requirementContext([
+    path.join(win64Path, 'dwmapi.dll'),
+    path.join(win64Path, 'ue4ss/UE4SS.dll'),
+  ])
+  assert.equal((await getRequirementStatus(installedRequirement, gamePath)).installed, true)
+  const rootDllOnly = requirementContext([
+    path.join(win64Path, 'dwmapi.dll'),
+    path.join(win64Path, 'UE4SS.dll'),
+  ])
+  const missingRequirement = await getRequirementStatus(rootDllOnly, gamePath)
+  assert.equal(missingRequirement.installed, false)
+  assert.deepEqual(missingRequirement.requirements.map((item) => item.name), ['UE4SS for Clair Obscur: Expedition 33'])
+  assert.equal((await getExtensionRequiredMods(rootDllOnly, gamePath)).code, 'EXTENSION_REQUIRED_MODS_MISSING')
 
   const scriptFiles = ['CoolMod/Scripts/', 'CoolMod/Scripts/main.lua', 'CoolMod/config.json']
   assert.equal(testScript(scriptFiles, GAME_ID).supported, true)
