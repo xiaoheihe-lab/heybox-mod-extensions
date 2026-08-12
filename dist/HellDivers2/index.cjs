@@ -298,7 +298,7 @@ async function readManifestFile(context, files, options) {
       const manifest = JSON.parse(normalizedText);
       console.log("mainfest manifest", manifest);
       const guid = String(manifest?.Guid || "").trim();
-      if (!guid || !Array.isArray(manifest?.Options)) continue;
+      if (!guid || !Array.isArray(manifest?.Options) || manifest.Options.length === 0) continue;
       console.log("mainfest guid", guid);
       return {
         manifest,
@@ -401,20 +401,17 @@ async function getManifestOptionFileGroups(context, files, options) {
   if (manifestCandidates.length === 0) return null;
   const manifestResult = await readManifestFile(context, files, options);
   if (!manifestResult) {
-    console.warn("[Helldivers2ManifestOptions] manifest candidates found but no valid option manifest", {
+    console.log("[Helldivers2ManifestOptions] ignoring manifest candidates without install options", {
       manifestCandidates,
       hasSourcePathByFile: !!options?.sourcePathByFile,
       stagingPath: options?.stagingPath || "",
       sourcePathKeys: Object.keys(options?.sourcePathByFile || {})
     });
-    throw new Error("\u8BFB\u53D6\u5B89\u88C5\u9009\u9879\u5931\u8D25");
+    return null;
   }
   const { manifest, rootPath } = manifestResult;
   const choices = buildManifestOptionChoices(manifest);
   logManifestOptions(manifestResult, choices);
-  if (choices.length === 0) {
-    throw new Error("\u8BFB\u53D6\u5B89\u88C5\u9009\u9879\u5931\u8D25");
-  }
   const response = await context.api.util.ui.request({
     type: "helldivers2_manifest_options",
     title: String(manifest.Name || "\u9009\u62E9\u5B89\u88C5\u5185\u5BB9"),

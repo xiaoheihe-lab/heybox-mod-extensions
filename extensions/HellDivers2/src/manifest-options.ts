@@ -51,7 +51,7 @@ async function readManifestFile(context: IExtensionContext, files: string[], opt
       const manifest = JSON.parse(normalizedText) as ManifestFile;
       console.log('mainfest manifest', manifest);
       const guid = String(manifest?.Guid || '').trim();
-      if (!guid || !Array.isArray(manifest?.Options)) continue;
+      if (!guid || !Array.isArray(manifest?.Options) || manifest.Options.length === 0) continue;
       console.log('mainfest guid', guid);
       return {
         manifest,
@@ -172,21 +172,18 @@ export async function getManifestOptionFileGroups(
 
   const manifestResult = await readManifestFile(context, files, options);
   if (!manifestResult) {
-    console.warn('[Helldivers2ManifestOptions] manifest candidates found but no valid option manifest', {
+    console.log('[Helldivers2ManifestOptions] ignoring manifest candidates without install options', {
       manifestCandidates,
       hasSourcePathByFile: !!options?.sourcePathByFile,
       stagingPath: options?.stagingPath || '',
       sourcePathKeys: Object.keys(options?.sourcePathByFile || {}),
     });
-    throw new Error('读取安装选项失败');
+    return null;
   }
   const { manifest, rootPath } = manifestResult;
 
   const choices = buildManifestOptionChoices(manifest);
   logManifestOptions(manifestResult, choices);
-  if (choices.length === 0) {
-    throw new Error('读取安装选项失败');
-  }
 
   const response = await context.api.util.ui.request({
     type: 'helldivers2_manifest_options',
