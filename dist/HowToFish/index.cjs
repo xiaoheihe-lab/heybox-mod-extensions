@@ -42,11 +42,11 @@ var GAME_SUBDIRECTORY = "How To Fish";
 var GAME_ROOT_TARGET = `{gamePath}/${GAME_SUBDIRECTORY}`;
 var MOD_TYPE_BEPINEX = `${GAME_ID}-bepinex-plugin`;
 var MOD_TYPE_MELONLOADER = `${GAME_ID}-melonloader-mod`;
+var MOD_TYPE_MELON_BEPINEX_BRIDGE = `${GAME_ID}-melon-bepinex-bridge`;
 var MOD_TYPE_BEPINEX_RUNTIME = `${GAME_ID}-bepinex-runtime`;
 var MOD_TYPE_MELONLOADER_RUNTIME = `${GAME_ID}-melonloader-runtime`;
 var MOD_TYPE_ROOT = `${GAME_ID}-root-loader`;
-var BEPINEX_RUNTIME_MOD_ID = "39989";
-var MELONLOADER_RUNTIME_MOD_ID = "41006";
+var MELON_BEPINEX_BRIDGE_MOD_ID = "41287";
 function normalizeArchivePath(value) {
   const normalized = String(value ?? "").replace(/\\/g, "/").replace(/^\/+/, "").replace(/^(\.\/)+/, "");
   if (!normalized || /^[a-z]:\//i.test(normalized) || normalized.includes("://")) return "";
@@ -76,7 +76,7 @@ function hasBepInExPluginPath(files) {
 function hasMelonLoaderModPath(files) {
   return files.some((file) => {
     const value = lower(file);
-    return value.includes("/mods/") || value.startsWith("mods/");
+    return value.includes("/mods/") || value.startsWith("mods/") || value.includes("/mlloader/mods/") || value.startsWith("mlloader/mods/");
   });
 }
 function hasLoaderRootFiles(files) {
@@ -106,6 +106,19 @@ function findMelonLoaderRuntimeRoot(files) {
   }
   return null;
 }
+function findMelonBepInExBridgeRoot(files) {
+  const normalized = files.map((file) => normalizeArchivePath(file)).filter(Boolean);
+  for (const winhttpFile of normalized) {
+    if (import_path.default.posix.basename(winhttpFile).toLowerCase() !== "winhttp.dll") continue;
+    const root = winhttpFile.split("/").slice(0, -1);
+    const hasSiblingDirectory = (name) => normalized.some((file) => {
+      const fileParts = file.split("/");
+      return fileParts.length > root.length && fileParts.slice(0, root.length).every((part, index) => part.toLowerCase() === root[index]?.toLowerCase()) && fileParts[root.length]?.toLowerCase() === name.toLowerCase();
+    });
+    if (hasSiblingDirectory("MLLoader") && hasSiblingDirectory("BepInEx")) return root;
+  }
+  return null;
+}
 function isGameArchive(gameId) {
   return String(gameId) === String(GAME_ID) || Number(gameId) === GAME_ID;
 }
@@ -118,18 +131,46 @@ function installUnderFolder(files, folder, modType) {
     const rel = normalizeArchivePath(source);
     if (!rel) continue;
     const sourceParts = rel.split("/");
-    const anchorIndex = findAnchor(rel, folder);
+    let anchorDepth = 1;
+    const anchorIndex = folder === "MLLoader/Mods" ? (() => {
+      const fileParts = sourceParts.map((part) => part.toLowerCase());
+      const mlloaderIndex = fileParts.indexOf("mlloader");
+      if (mlloaderIndex >= 0 && fileParts[mlloaderIndex + 1] === "mods") {
+        anchorDepth = 2;
+        return mlloaderIndex;
+      }
+      return fileParts.indexOf("mods");
+    })() : findAnchor(rel, folder);
     if (anchorIndex < 0) {
-      if (isDll(rel) && !hasPathSegment(rel, "BepInEx") && !hasPathSegment(rel, "Mods")) {
-        instructions.push({ type: "copy", source, destination: import_path.default.posix.join(folder === "BepInEx" ? "BepInEx/plugins" : "Mods", import_path.default.posix.basename(rel)) });
+      if (isDll(rel) && !hasPathSegment(rel, "BepInEx") && !hasPathSegment(rel, "Mods") && !hasPathSegment(rel, "MLLoader")) {
+        if (folder === "BepInEx") {
+          instructions.push({ type: "copy", source, destination: import_path.default.posix.join("BepInEx/plugins", import_path.default.posix.basename(rel)) });
+          instructions.push({ type: "copy", source, destination: import_path.default.posix.join("MLLoader/Mods", import_path.default.posix.basename(rel)) });
+        } else {
+          instructions.push({ type: "copy", source, destination: import_path.default.posix.join("MLLoader/Mods", import_path.default.posix.basename(rel)) });
+        }
       }
       continue;
     }
-    const relative = sourceParts.slice(anchorIndex + 1).join("/");
+    const relative = sourceParts.slice(anchorIndex + anchorDepth).join("/");
     if (!relative) continue;
     instructions.push({ type: "copy", source, destination: import_path.default.posix.join(folder, relative) });
   }
   return { instructions, modType };
+}
+function installMelonBepInExBridge(files) {
+  const root = findMelonBepInExBridgeRoot(files);
+  if (!root) return { instructions: [], modType: MOD_TYPE_MELON_BEPINEX_BRIDGE };
+  const instructions = [];
+  for (const source of files) {
+    const rel = normalizeArchivePath(source);
+    if (!rel) continue;
+    const sourceParts = rel.split("/");
+    const matchesRoot = root.every((part, index) => sourceParts[index]?.toLowerCase() === part.toLowerCase());
+    if (!matchesRoot || sourceParts.length <= root.length) continue;
+    instructions.push({ type: "copy", source, destination: sourceParts.slice(root.length).join("/") });
+  }
+  return { instructions, modType: MOD_TYPE_MELON_BEPINEX_BRIDGE };
 }
 function installRoot(files) {
   const instructions = [];
@@ -169,6 +210,9 @@ function testBepInEx(files, gameId) {
 function testMelonLoader(files, gameId) {
   return Promise.resolve({ supported: isGameArchive(gameId) && hasMelonLoaderModPath(files), requiredFiles: [] });
 }
+function testMelonBepInExBridge(files, gameId) {
+  return Promise.resolve({ supported: isGameArchive(gameId) && findMelonBepInExBridgeRoot(files) !== null, requiredFiles: [] });
+}
 function testRoot(files, gameId) {
   return Promise.resolve({ supported: isGameArchive(gameId) && hasLoaderRootFiles(files), requiredFiles: [] });
 }
@@ -194,24 +238,13 @@ async function findGamePath(context) {
   const game = await context.api.util.GameStoreHelper.findByAppId(STEAM_APP_ID);
   return game?.gamePath;
 }
-function getBepInExRequirement() {
+function getMelonBepInExBridgeRequirement() {
   return {
-    key: "howtofish-bepinex-runtime",
-    name: "BepInEx 5 (x64)",
-    modId: BEPINEX_RUNTIME_MOD_ID,
-    mod_id: BEPINEX_RUNTIME_MOD_ID,
-    modType: MOD_TYPE_BEPINEX_RUNTIME,
-    openModDetailDialog: false,
-    requirement: "enabled"
-  };
-}
-function getMelonLoaderRequirement() {
-  return {
-    key: "howtofish-melonloader-runtime",
-    name: "MelonLoader",
-    modId: MELONLOADER_RUNTIME_MOD_ID,
-    mod_id: MELONLOADER_RUNTIME_MOD_ID,
-    modType: MOD_TYPE_MELONLOADER_RUNTIME,
+    key: "howtofish-melon-bepinex-bridge",
+    name: "MelonLoader + BepInEx Bridge",
+    modId: MELON_BEPINEX_BRIDGE_MOD_ID,
+    mod_id: MELON_BEPINEX_BRIDGE_MOD_ID,
+    modType: MOD_TYPE_MELON_BEPINEX_BRIDGE,
     openModDetailDialog: false,
     requirement: "enabled"
   };
@@ -219,12 +252,17 @@ function getMelonLoaderRequirement() {
 async function getRequirementStatus(context, gamePath) {
   const resolvedGamePath = String(gamePath || await findGamePath(context) || "");
   const winhttpPath = resolvedGamePath ? context.api.util.path.join(resolvedGamePath, GAME_SUBDIRECTORY, "winhttp.dll") : "";
-  const versionDllPath = resolvedGamePath ? context.api.util.path.join(resolvedGamePath, GAME_SUBDIRECTORY, "version.dll") : "";
-  const hasBepInEx = !!resolvedGamePath && await fileExists(context, winhttpPath);
-  const hasMelonLoader = !!resolvedGamePath && await fileExists(context, versionDllPath);
+  const mlLoaderPath = resolvedGamePath ? context.api.util.path.join(resolvedGamePath, GAME_SUBDIRECTORY, "MLLoader") : "";
+  const hasWinhttp = !!resolvedGamePath && await fileExists(context, winhttpPath);
+  let hasMLLoader = false;
+  try {
+    const stat = await context.api.util.fs.stat(mlLoaderPath);
+    hasMLLoader = Boolean(stat?.isDirectory);
+  } catch {
+    hasMLLoader = false;
+  }
   const requirements = [];
-  if (!hasBepInEx) requirements.push(getBepInExRequirement());
-  if (!hasMelonLoader) requirements.push(getMelonLoaderRequirement());
+  if (!hasWinhttp || !hasMLLoader) requirements.push(getMelonBepInExBridgeRequirement());
   return {
     installed: requirements.length === 0,
     gamePath: resolvedGamePath,
@@ -256,14 +294,16 @@ async function main(context) {
   });
   context.registerModType(MOD_TYPE_BEPINEX, 25, (gameId) => isGameArchive(gameId), () => GAME_ROOT_TARGET, () => Promise.resolve(false), { name: "BepInEx Plugin" });
   context.registerModType(MOD_TYPE_MELONLOADER, 25, (gameId) => isGameArchive(gameId), () => GAME_ROOT_TARGET, () => Promise.resolve(false), { name: "MelonLoader Mod" });
+  context.registerModType(MOD_TYPE_MELON_BEPINEX_BRIDGE, 1, (gameId) => isGameArchive(gameId), () => GAME_ROOT_TARGET, () => Promise.resolve(false), { name: "MelonLoader + BepInEx Bridge" });
   context.registerModType(MOD_TYPE_BEPINEX_RUNTIME, 25, (gameId) => isGameArchive(gameId), () => GAME_ROOT_TARGET, () => Promise.resolve(false), { name: "BepInEx 5 (x64)" });
-  context.registerModType(MOD_TYPE_MELONLOADER_RUNTIME, 25, (gameId) => isGameArchive(gameId), () => GAME_ROOT_TARGET, () => Promise.resolve(false), { name: `MelonLoader (mod ${MELONLOADER_RUNTIME_MOD_ID})` });
+  context.registerModType(MOD_TYPE_MELONLOADER_RUNTIME, 25, (gameId) => isGameArchive(gameId), () => GAME_ROOT_TARGET, () => Promise.resolve(false), { name: "MelonLoader" });
   context.registerModType(MOD_TYPE_ROOT, 25, (gameId) => isGameArchive(gameId), () => GAME_ROOT_TARGET, () => Promise.resolve(false), { name: "Runtime Loader" });
+  context.registerInstaller(MOD_TYPE_MELON_BEPINEX_BRIDGE, 1, testMelonBepInExBridge, (files) => installMelonBepInExBridge(files));
   context.registerInstaller(MOD_TYPE_BEPINEX_RUNTIME, 10, testBepInExRuntime, (files) => ({ ...installRoot(files), modType: MOD_TYPE_BEPINEX_RUNTIME }));
   context.registerInstaller(MOD_TYPE_MELONLOADER_RUNTIME, 11, testMelonLoaderRuntime, (files) => installMelonLoaderRuntime(files));
   context.registerInstaller(MOD_TYPE_ROOT, 20, testRoot, (files) => installRoot(files));
   context.registerInstaller(MOD_TYPE_BEPINEX, 20, testBepInEx, (files) => installUnderFolder(files, "BepInEx", MOD_TYPE_BEPINEX));
-  context.registerInstaller(MOD_TYPE_MELONLOADER, 20, testMelonLoader, (files) => installUnderFolder(files, "Mods", MOD_TYPE_MELONLOADER));
+  context.registerInstaller(MOD_TYPE_MELONLOADER, 20, testMelonLoader, (files) => installUnderFolder(files, "MLLoader/Mods", MOD_TYPE_MELONLOADER));
   context.registerExtensionAction(GAME_ID, "getExtensionRequiredMods", () => getExtensionRequiredMods(context));
   return true;
 }
