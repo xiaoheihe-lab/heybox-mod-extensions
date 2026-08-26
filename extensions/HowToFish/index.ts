@@ -258,6 +258,13 @@ async function main(context: IExtensionContext): Promise<boolean> {
     queryPath: () => findGamePath(context),
     requiredFiles: [`${GAME_SUBDIRECTORY}/${EXECUTABLE}`],
     setup: async (discovery: any) => getExtensionRequiredMods(context, String(discovery?.path || discovery?.gamePath || '')),
+    localModFeatures: [
+      {
+        modId: Number(MELON_BEPINEX_BRIDGE_MOD_ID),
+        marked: true,
+        mark: { type: 'prerequisite', label: '前置模组' },
+      },
+    ],
     environment: { SteamAPPId: STEAM_APP_ID }, details: { steamAppId: GAME_ID },
   })
   context.registerModType(MOD_TYPE_BEPINEX, 25, (gameId: string | number) => isGameArchive(gameId), () => GAME_ROOT_TARGET, () => Promise.resolve(false), { name: 'BepInEx Plugin' })

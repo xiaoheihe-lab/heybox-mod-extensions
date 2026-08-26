@@ -289,6 +289,13 @@ async function main(context) {
     queryPath: () => findGamePath(context),
     requiredFiles: [`${GAME_SUBDIRECTORY}/${EXECUTABLE}`],
     setup: async (discovery) => getExtensionRequiredMods(context, String(discovery?.path || discovery?.gamePath || "")),
+    localModFeatures: [
+      {
+        modId: Number(MELON_BEPINEX_BRIDGE_MOD_ID),
+        marked: true,
+        mark: { type: "prerequisite", label: "\u524D\u7F6E\u6A21\u7EC4" }
+      }
+    ],
     environment: { SteamAPPId: STEAM_APP_ID },
     details: { steamAppId: GAME_ID }
   });
