@@ -11,8 +11,10 @@ const GAME_ROOT_TARGET = `{gamePath}/${GAME_SUBDIRECTORY}`
 const MOD_TYPE_BEPINEX = `${GAME_ID}-bepinex-plugin`
 const MOD_TYPE_MELONLOADER = `${GAME_ID}-melonloader-mod`
 const MOD_TYPE_BEPINEX_RUNTIME = `${GAME_ID}-bepinex-runtime`
+const MOD_TYPE_MELONLOADER_RUNTIME = `${GAME_ID}-melonloader-runtime`
 const MOD_TYPE_ROOT = `${GAME_ID}-root-loader`
 const BEPINEX_RUNTIME_MOD_ID = '39989'
+const MELONLOADER_RUNTIME_MOD_ID = '41006'
 
 type Instruction = { type: 'copy'; source: string; destination: string }
 type InstallerResult = { instructions: Instruction[]; modType: string }
@@ -54,6 +56,24 @@ function hasBepInExRuntimeFiles(files: string[]): boolean {
     return value === 'winhttp.dll' || value === 'doorstop_config.ini' || value.startsWith('bepinex/core/')
   })
 }
+function findMelonLoaderRuntimeRoot(files: string[]): string[] | null {
+  const normalized = files.map((file) => normalizeArchivePath(file)).filter(Boolean)
+  const versionFiles = normalized.filter((file) => path.posix.basename(file).toLowerCase() === 'version.dll')
+  for (const versionFile of versionFiles) {
+    const versionParts = versionFile.split('/')
+    const versionRoot = versionParts.slice(0, -1)
+    const hasSiblingMelonLoader = normalized.some((file) => {
+      const fileParts = file.split('/')
+      const melonIndex = fileParts.findIndex((part) => part.toLowerCase() === 'melonloader')
+      return melonIndex >= 0
+        && melonIndex === versionRoot.length
+        && fileParts.slice(0, melonIndex).every((part, index) => part.toLowerCase() === versionRoot[index]?.toLowerCase())
+        && fileParts.length > melonIndex + 1
+    })
+    if (hasSiblingMelonLoader) return versionRoot
+  }
+  return null
+}
 function isGameArchive(gameId: string | number): boolean { return String(gameId) === String(GAME_ID) || Number(gameId) === GAME_ID }
 function findAnchor(file: string, anchor: string): number { return parts(file).findIndex((part) => part.toLowerCase() === anchor.toLowerCase()) }
 
@@ -92,12 +112,37 @@ function installRoot(files: string[]): InstallerResult {
   return { instructions, modType: MOD_TYPE_ROOT }
 }
 
+function installMelonLoaderRuntime(files: string[]): InstallerResult {
+  const root = findMelonLoaderRuntimeRoot(files)
+  if (!root) return { instructions: [], modType: MOD_TYPE_MELONLOADER_RUNTIME }
+  const instructions: Instruction[] = []
+  for (const source of files) {
+    const rel = normalizeArchivePath(source)
+    if (!rel) continue
+    const sourceParts = rel.split('/')
+    const isUnderRuntimeRoot = root.every((part, index) => sourceParts[index]?.toLowerCase() === part.toLowerCase())
+    if (!isUnderRuntimeRoot || sourceParts.length <= root.length) continue
+    instructions.push({
+      type: 'copy',
+      source,
+      destination: sourceParts.slice(root.length).join('/'),
+    })
+  }
+  return { instructions, modType: MOD_TYPE_MELONLOADER_RUNTIME }
+}
+
 function testBepInEx(files: string[], gameId: string | number) {
   return Promise.resolve({ supported: isGameArchive(gameId) && (hasBepInExPluginPath(files) || (files.some(isDll) && !hasMelonLoaderModPath(files) && !hasLoaderRootFiles(files))), requiredFiles: [] })
 }
 function testMelonLoader(files: string[], gameId: string | number) { return Promise.resolve({ supported: isGameArchive(gameId) && hasMelonLoaderModPath(files), requiredFiles: [] }) }
 function testRoot(files: string[], gameId: string | number) { return Promise.resolve({ supported: isGameArchive(gameId) && hasLoaderRootFiles(files), requiredFiles: [] }) }
-function testBepInExRuntime(files: string[], gameId: string | number) { return Promise.resolve({ supported: isGameArchive(gameId) && hasBepInExRuntimeFiles(files), requiredFiles: [] }) }
+function testBepInExRuntime(files: string[], gameId: string | number) {
+  return Promise.resolve({
+    supported: isGameArchive(gameId) && hasBepInExRuntimeFiles(files) && findMelonLoaderRuntimeRoot(files) === null,
+    requiredFiles: [],
+  })
+}
+function testMelonLoaderRuntime(files: string[], gameId: string | number) { return Promise.resolve({ supported: isGameArchive(gameId) && findMelonLoaderRuntimeRoot(files) !== null, requiredFiles: [] }) }
 
 async function fileExists(context: IExtensionContext, filePath: string): Promise<boolean> {
   if (!filePath) return false
@@ -126,14 +171,31 @@ function getBepInExRequirement() {
   }
 }
 
+function getMelonLoaderRequirement() {
+  return {
+    key: 'howtofish-melonloader-runtime',
+    name: 'MelonLoader',
+    modId: MELONLOADER_RUNTIME_MOD_ID,
+    mod_id: MELONLOADER_RUNTIME_MOD_ID,
+    modType: MOD_TYPE_MELONLOADER_RUNTIME,
+    openModDetailDialog: false,
+    requirement: 'enabled',
+  }
+}
+
 async function getRequirementStatus(context: IExtensionContext, gamePath?: string): Promise<RequirementStatus> {
   const resolvedGamePath = String(gamePath || await findGamePath(context) || '')
   const winhttpPath = resolvedGamePath ? context.api.util.path.join(resolvedGamePath, GAME_SUBDIRECTORY, 'winhttp.dll') : ''
-  const installed = !!resolvedGamePath && await fileExists(context, winhttpPath)
+  const versionDllPath = resolvedGamePath ? context.api.util.path.join(resolvedGamePath, GAME_SUBDIRECTORY, 'version.dll') : ''
+  const hasBepInEx = !!resolvedGamePath && await fileExists(context, winhttpPath)
+  const hasMelonLoader = !!resolvedGamePath && await fileExists(context, versionDllPath)
+  const requirements: Array<Record<string, unknown>> = []
+  if (!hasBepInEx) requirements.push(getBepInExRequirement())
+  if (!hasMelonLoader) requirements.push(getMelonLoaderRequirement())
   return {
-    installed,
+    installed: requirements.length === 0,
     gamePath: resolvedGamePath,
-    requirements: installed ? [] : [getBepInExRequirement()],
+    requirements,
   }
 }
 
@@ -161,9 +223,11 @@ async function main(context: IExtensionContext): Promise<boolean> {
   context.registerModType(MOD_TYPE_BEPINEX, 25, (gameId: string | number) => isGameArchive(gameId), () => GAME_ROOT_TARGET, () => Promise.resolve(false), { name: 'BepInEx Plugin' })
   context.registerModType(MOD_TYPE_MELONLOADER, 25, (gameId: string | number) => isGameArchive(gameId), () => GAME_ROOT_TARGET, () => Promise.resolve(false), { name: 'MelonLoader Mod' })
   context.registerModType(MOD_TYPE_BEPINEX_RUNTIME, 25, (gameId: string | number) => isGameArchive(gameId), () => GAME_ROOT_TARGET, () => Promise.resolve(false), { name: 'BepInEx 5 (x64)' })
+  context.registerModType(MOD_TYPE_MELONLOADER_RUNTIME, 25, (gameId: string | number) => isGameArchive(gameId), () => GAME_ROOT_TARGET, () => Promise.resolve(false), { name: `MelonLoader (mod ${MELONLOADER_RUNTIME_MOD_ID})` })
   context.registerModType(MOD_TYPE_ROOT, 25, (gameId: string | number) => isGameArchive(gameId), () => GAME_ROOT_TARGET, () => Promise.resolve(false), { name: 'Runtime Loader' })
   context.registerInstaller(MOD_TYPE_BEPINEX_RUNTIME, 10, testBepInExRuntime, (files: string[]) => ({ ...installRoot(files), modType: MOD_TYPE_BEPINEX_RUNTIME }))
-  context.registerInstaller(MOD_TYPE_ROOT, 15, testRoot, (files: string[]) => installRoot(files))
+  context.registerInstaller(MOD_TYPE_MELONLOADER_RUNTIME, 11, testMelonLoaderRuntime, (files: string[]) => installMelonLoaderRuntime(files))
+  context.registerInstaller(MOD_TYPE_ROOT, 20, testRoot, (files: string[]) => installRoot(files))
   context.registerInstaller(MOD_TYPE_BEPINEX, 20, testBepInEx, (files: string[]) => installUnderFolder(files, 'BepInEx', MOD_TYPE_BEPINEX))
   context.registerInstaller(MOD_TYPE_MELONLOADER, 20, testMelonLoader, (files: string[]) => installUnderFolder(files, 'Mods', MOD_TYPE_MELONLOADER))
   context.registerExtensionAction(GAME_ID, 'getExtensionRequiredMods', () => getExtensionRequiredMods(context))
