@@ -35,6 +35,8 @@ var GAME_FOLDER = "b1";
 var WIN64_PATH = "b1/Binaries/Win64";
 var UE4SS_RUNTIME_PATH = `${WIN64_PATH}/ue4ss`;
 var UE4SS_MODS_PATH = `${UE4SS_RUNTIME_PATH}/Mods`;
+var CSHARP_LOADER_PATH = `${WIN64_PATH}/CSharpLoader`;
+var CSHARP_MODS_PATH = `${CSHARP_LOADER_PATH}/Mods`;
 var PAK_MODS_PATH = "b1/Content/Paks/~mods";
 var LOGIC_MODS_PATH = "b1/Content/Paks/LogicMods";
 var UE4SS_DWMAPI = "dwmapi.dll";
@@ -52,6 +54,7 @@ var MOD_TYPE_SIGNATURE_BYPASS = `${GAME_ID}-signature-bypass`;
 var MOD_TYPE_SCRIPT = `${GAME_ID}-ue4ss-script`;
 var MOD_TYPE_DLL = `${GAME_ID}-ue4ss-dll`;
 var MOD_TYPE_ROOT = `${GAME_ID}-root`;
+var MOD_TYPE_CSHARP = `${GAME_ID}-csharp-mod`;
 var MOD_TYPE_PRIORITY = {
   ue4ss: 950,
   combo: 900,
@@ -60,7 +63,8 @@ var MOD_TYPE_PRIORITY = {
   signatureBypass: 700,
   script: 650,
   dll: 600,
-  root: 500
+  root: 500,
+  csharp: 450
 };
 var PAK_LOAD_ORDER_PROVIDER_ID = "black-myth-wukong-pak";
 var PAK_EXTENSION = ".pak";
@@ -928,6 +932,32 @@ function testResult(supported) {
   return { supported, requiredFiles: [] };
 }
 
+// src/installers/csharp.ts
+function findCSharpModsAnchor(files) {
+  for (const file of files) {
+    const parts = splitArchivePath(file);
+    for (let index = 0; index < parts.length - 1; index += 1) {
+      if (parts[index]?.toLowerCase() !== "csharploader" || parts[index + 1]?.toLowerCase() !== "mods") continue;
+      const anchor = parts.slice(0, index + 2);
+      const hasPayload = files.some((candidate) => isArchiveFile(candidate, files) && splitArchivePath(candidate).length > anchor.length && isUnderSegments(candidate, anchor));
+      if (hasPayload) return anchor;
+    }
+  }
+  return null;
+}
+function testCSharpMod(files, gameId) {
+  return testResult(isTargetGame(gameId) && !isFomodPackage2(files) && findCSharpModsAnchor(files) !== null);
+}
+function installCSharpMod(files) {
+  const anchor = findCSharpModsAnchor(files);
+  const instructions = anchor ? files.filter((file) => isArchiveFile(file, files) && splitArchivePath(file).length > anchor.length && isUnderSegments(file, anchor)).map((file) => ({
+    type: "copy",
+    source: file,
+    destination: archiveJoin(CSHARP_MODS_PATH, removeLeadingSegments(file, anchor.length))
+  })) : [];
+  return { instructions, modType: MOD_TYPE_CSHARP };
+}
+
 // src/installers/prerequisites.ts
 function findArchiveFile(files, name) {
   const lower = name.toLowerCase();
@@ -974,7 +1004,15 @@ function installSignatureBypass(files) {
 
 // src/installers/root.ts
 function findGameRootAnchor(files) {
-  return findExplicitDirectory(files, GAME_FOLDER);
+  for (const file of files) {
+    const parts = splitArchivePath(file);
+    const rootIndex = parts.findIndex((part) => part.toLowerCase() === GAME_FOLDER.toLowerCase());
+    if (rootIndex < 0) continue;
+    const anchor = parts.slice(0, rootIndex + 1);
+    const hasPayload = files.some((candidate) => isArchiveFile(candidate, files) && splitArchivePath(candidate).length > anchor.length && isUnderSegments(candidate, anchor));
+    if (hasPayload) return anchor;
+  }
+  return null;
 }
 function testRoot(files, gameId) {
   return testResult(isTargetGame(gameId) && !isFomodPackage2(files) && findGameRootAnchor(files) !== null);
@@ -1239,6 +1277,7 @@ function registerBlackMythWukongModTypes(context) {
   register(context, MOD_TYPE_SCRIPT, MOD_TYPE_PRIORITY.script, "UE4SS Script Mod", 50, testScript, installScript);
   register(context, MOD_TYPE_DLL, MOD_TYPE_PRIORITY.dll, "UE4SS DLL Mod", 53, testDll, installDll);
   register(context, MOD_TYPE_ROOT, MOD_TYPE_PRIORITY.root, "Root Game Folder Mod", 55, testRoot, installRoot);
+  register(context, MOD_TYPE_CSHARP, MOD_TYPE_PRIORITY.csharp, "CSharpLoader Mod", 60, testCSharpMod, installCSharpMod);
 }
 
 // src/requirements.ts

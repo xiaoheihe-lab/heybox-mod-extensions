@@ -2,9 +2,11 @@ import assert from 'node:assert/strict'
 import path from 'node:path'
 import {
   GAME_ID,
+  MOD_TYPE_CSHARP,
   MOD_TYPE_FOMOD,
   MOD_TYPE_PAK,
   MOD_TYPE_PRIORITY,
+  MOD_TYPE_ROOT,
   MOD_TYPE_UE4SS,
   PAK_ATTRIBUTE,
   PAK_LOAD_ORDER_PROVIDER_ID,
@@ -13,6 +15,7 @@ import {
 } from '../src/constants'
 import {
   INSTALL_CANCELLED,
+  installCSharpMod,
   installDll,
   installLogic,
   installPak,
@@ -21,6 +24,7 @@ import {
   installSignatureBypass,
   installUe4ss,
   installUe4ssCombo,
+  testCSharpMod,
   testDll,
   testLogic,
   testPak,
@@ -103,14 +107,27 @@ async function main() {
     registerInstaller: (id: string, priority: number) => registeredInstallers.push({ id, priority }),
     registerPostInstallerAttributeExtractor: (_priority: number, extractor: any) => postInstallerExtractors.push(extractor),
   } as any)
-  assert.equal(registeredTypes.length, 9)
-  assert.equal(registeredInstallers.length, 9)
+  assert.equal(registeredTypes.length, 10)
+  assert.equal(registeredInstallers.length, 10)
   assert.equal(registeredTypes.find((item) => item.id === MOD_TYPE_FOMOD)?.priority, 1000)
   assert.equal(postInstallerExtractors.length, 1)
   assert.equal(Math.max(...Object.values(MOD_TYPE_PRIORITY)), MOD_TYPE_PRIORITY.ue4ss)
   assert.equal(
     registeredInstallers.find((item) => item.id === MOD_TYPE_UE4SS)?.priority,
     Math.min(...registeredInstallers.map((item) => item.priority)),
+  )
+  assert.ok(Math.min(
+    MOD_TYPE_PRIORITY.ue4ss,
+    MOD_TYPE_PRIORITY.combo,
+    MOD_TYPE_PRIORITY.logic,
+    MOD_TYPE_PRIORITY.signatureBypass,
+    MOD_TYPE_PRIORITY.script,
+    MOD_TYPE_PRIORITY.dll,
+  ) > MOD_TYPE_PRIORITY.root)
+  assert.ok(MOD_TYPE_PRIORITY.root > MOD_TYPE_PRIORITY.csharp)
+  assert.ok(
+    (registeredInstallers.find((item) => item.id === MOD_TYPE_CSHARP)?.priority ?? 0)
+      > (registeredInstallers.find((item) => item.id === MOD_TYPE_ROOT)?.priority ?? 0),
   )
   assert.equal(registeredTypes.some((item) => /save|config/i.test(`${item.id} ${item.name}`)), false)
 
@@ -230,9 +247,46 @@ async function main() {
     { type: 'generatefile', data: '', destination: 'b1/Binaries/Win64/ue4ss/Mods/DllMod/enabled.txt' },
   ])
 
-  const rootFiles = ['Wrapper/b1/', 'Wrapper/b1/Content/Movies/intro.bk2']
+  const rootFiles = ['Wrapper/README.md', 'Wrapper/b1/Content/Movies/intro.bk2']
+  assert.equal(testRoot(rootFiles, GAME_ID).supported, true)
   assert.deepEqual(installRoot(rootFiles).instructions, [
     { type: 'copy', source: 'Wrapper/b1/Content/Movies/intro.bk2', destination: 'b1/Content/Movies/intro.bk2' },
+  ])
+
+  const csharpRuntimeFiles = [
+    'README.md',
+    'b1/Binaries/Win64/CSharpLoader/0Harmony.dll',
+    'b1/Binaries/Win64/CSharpLoader/CSharpManager.bin',
+    'b1/Binaries/Win64/CSharpLoader/CSharpModBase.dll',
+    'b1/Binaries/Win64/CSharpLoader/b1cs.ini',
+    'b1/Binaries/Win64/version.dll',
+  ]
+  assert.equal(testRoot(csharpRuntimeFiles, GAME_ID).supported, true)
+  assert.equal(testCSharpMod(csharpRuntimeFiles, GAME_ID).supported, false)
+  assert.deepEqual(installRoot(csharpRuntimeFiles).instructions, [
+    { type: 'copy', source: 'b1/Binaries/Win64/CSharpLoader/0Harmony.dll', destination: 'b1/Binaries/Win64/CSharpLoader/0Harmony.dll' },
+    { type: 'copy', source: 'b1/Binaries/Win64/CSharpLoader/CSharpManager.bin', destination: 'b1/Binaries/Win64/CSharpLoader/CSharpManager.bin' },
+    { type: 'copy', source: 'b1/Binaries/Win64/CSharpLoader/CSharpModBase.dll', destination: 'b1/Binaries/Win64/CSharpLoader/CSharpModBase.dll' },
+    { type: 'copy', source: 'b1/Binaries/Win64/CSharpLoader/b1cs.ini', destination: 'b1/Binaries/Win64/CSharpLoader/b1cs.ini' },
+    { type: 'copy', source: 'b1/Binaries/Win64/version.dll', destination: 'b1/Binaries/Win64/version.dll' },
+  ])
+
+  const csharpModFiles = [
+    'Archive/CSharpLoader/Mods/ExampleMod/ExampleMod.dll',
+    'Archive/CSharpLoader/Mods/ExampleMod/config.json',
+    'Archive/CSharpLoader/Mods/ExampleMod/Data/table.data',
+    'Archive/README.md',
+  ]
+  assert.equal(testCSharpMod(csharpModFiles, GAME_ID).supported, true)
+  assert.equal(testCSharpMod(['Wrapper\\csharploader\\mods\\ExampleMod\\ExampleMod.dll'], GAME_ID).supported, true)
+  assert.equal(testCSharpMod(['ExampleMod/ExampleMod.dll'], GAME_ID).supported, false)
+  assert.equal(testCSharpMod(['CSharpLoader/Other/ExampleMod.dll'], GAME_ID).supported, false)
+  assert.equal(testCSharpMod(['CSharpLoader/Mods/'], GAME_ID).supported, false)
+  assert.equal(testCSharpMod(['fomod/ModuleConfig.xml', ...csharpModFiles], GAME_ID).supported, false)
+  assert.deepEqual(installCSharpMod(csharpModFiles).instructions, [
+    { type: 'copy', source: 'Archive/CSharpLoader/Mods/ExampleMod/ExampleMod.dll', destination: 'b1/Binaries/Win64/CSharpLoader/Mods/ExampleMod/ExampleMod.dll' },
+    { type: 'copy', source: 'Archive/CSharpLoader/Mods/ExampleMod/config.json', destination: 'b1/Binaries/Win64/CSharpLoader/Mods/ExampleMod/config.json' },
+    { type: 'copy', source: 'Archive/CSharpLoader/Mods/ExampleMod/Data/table.data', destination: 'b1/Binaries/Win64/CSharpLoader/Mods/ExampleMod/Data/table.data' },
   ])
 
   const singlePak = await installPak(selectionContext(null), ['Nested/Foo.pak', 'Nested/Foo.utoc'])
