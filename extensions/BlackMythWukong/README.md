@@ -9,10 +9,13 @@ Steam AppID: `2358720`
 - Signature Bypass packages containing `dsound.dll` and `sig.lua` in one package tree.
 - UE4SS Script Mods (`Scripts` + `.lua`).
 - UE4SS DLL Mods (`dlls` + `.dll`), with `enabled.txt` generated when missing.
+- CSharpLoader Mods containing a `CSharpLoader/Mods` path; everything below that path is deployed to `b1/Binaries/Win64/CSharpLoader/Mods`.
 - UE4SS Script + LogicMod combination packages rooted at `b1`.
 - LogicMods rooted at an explicit `LogicMods` directory.
 - Ordinary `.pak` packages deployed to `b1/Content/Paks/~mods`.
-- Root packages containing an explicit `b1` directory.
+- Root packages containing files below a `b1` directory.
+
+CSharpLoader runtime archives containing files below a `b1` directory use the Root package installer; a separate archive entry for the directory itself is not required. For example, `b1/Binaries/Win64/version.dll` and `b1/Binaries/Win64/CSharpLoader/**` are preserved at those game-relative paths.
 
 Config and Save packages that deploy outside the game directory are intentionally not supported.
 

@@ -2,6 +2,7 @@ import type { IExtensionContext } from 'heybox-mod-api'
 import { registerFomodInstaller } from '@heybox-mod-extensions/fomod-utils'
 import {
   GAME_ID,
+  MOD_TYPE_CSHARP,
   MOD_TYPE_DLL,
   MOD_TYPE_FOMOD,
   MOD_TYPE_LOGIC,
@@ -14,6 +15,7 @@ import {
   MOD_TYPE_UE4SS_COMBO,
 } from './constants'
 import {
+  installCSharpMod,
   installDll,
   installLogic,
   installPak,
@@ -22,6 +24,7 @@ import {
   installSignatureBypass,
   installUe4ss,
   installUe4ssCombo,
+  testCSharpMod,
   testDll,
   testLogic,
   testPak,
@@ -103,4 +106,5 @@ export function registerBlackMythWukongModTypes(context: IExtensionContext): voi
   register(context, MOD_TYPE_SCRIPT, MOD_TYPE_PRIORITY.script, 'UE4SS Script Mod', 50, testScript, installScript)
   register(context, MOD_TYPE_DLL, MOD_TYPE_PRIORITY.dll, 'UE4SS DLL Mod', 53, testDll, installDll)
   register(context, MOD_TYPE_ROOT, MOD_TYPE_PRIORITY.root, 'Root Game Folder Mod', 55, testRoot, installRoot)
+  register(context, MOD_TYPE_CSHARP, MOD_TYPE_PRIORITY.csharp, 'CSharpLoader Mod', 60, testCSharpMod, installCSharpMod)
 }

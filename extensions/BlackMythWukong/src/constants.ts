@@ -9,6 +9,8 @@ export const GAME_FOLDER = 'b1'
 export const WIN64_PATH = 'b1/Binaries/Win64'
 export const UE4SS_RUNTIME_PATH = `${WIN64_PATH}/ue4ss`
 export const UE4SS_MODS_PATH = `${UE4SS_RUNTIME_PATH}/Mods`
+export const CSHARP_LOADER_PATH = `${WIN64_PATH}/CSharpLoader`
+export const CSHARP_MODS_PATH = `${CSHARP_LOADER_PATH}/Mods`
 export const PAK_MODS_PATH = 'b1/Content/Paks/~mods'
 export const LOGIC_MODS_PATH = 'b1/Content/Paks/LogicMods'
 
@@ -29,6 +31,7 @@ export const MOD_TYPE_SIGNATURE_BYPASS = `${GAME_ID}-signature-bypass`
 export const MOD_TYPE_SCRIPT = `${GAME_ID}-ue4ss-script`
 export const MOD_TYPE_DLL = `${GAME_ID}-ue4ss-dll`
 export const MOD_TYPE_ROOT = `${GAME_ID}-root`
+export const MOD_TYPE_CSHARP = `${GAME_ID}-csharp-mod`
 
 export const MOD_TYPE_PRIORITY = {
   ue4ss: 950,
@@ -39,6 +42,7 @@ export const MOD_TYPE_PRIORITY = {
   script: 650,
   dll: 600,
   root: 500,
+  csharp: 450,
 } as const
 
 export const PAK_LOAD_ORDER_PROVIDER_ID = 'black-myth-wukong-pak'
