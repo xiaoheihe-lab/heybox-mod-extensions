@@ -12,7 +12,7 @@
     "@heybox-mod-extensions/fomod-utils": "workspace:*"
   },
   "devDependencies": {
-    "heybox-mod-api": "1.9.0",
+    "heybox-mod-api": "1.17.0",
     "typescript": "^5.7.0"
   }
 }

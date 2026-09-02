@@ -1,16 +1,15 @@
 import { GAME_ID } from '../constants'
-import type { LoadOrderEntry } from '../loadOrder/protocol'
+import type { IExtensionContext, LoadOrderEntry } from 'heybox-mod-api'
 import { notify } from '../ui'
 import { hasLaunchOptionArgument, REDMOD_STEAM_ARGUMENT } from './arguments'
 import { buildRedmodLaunchOptionPrompt } from './prompt'
-import type { SteamLaunchOptionCapableContext } from './protocol'
 
 function responsePayload(response: any): Record<string, unknown> {
   return response?.payload && typeof response.payload === 'object' ? response.payload : {}
 }
 
 export class RedmodSteamLaunchOptionCoordinator {
-  constructor(private readonly context: SteamLaunchOptionCapableContext) {}
+  constructor(private readonly context: IExtensionContext) {}
 
   public async afterDeploy(entries: LoadOrderEntry[]): Promise<void> {
     if (!entries.some((entry) => entry.enabled)) return

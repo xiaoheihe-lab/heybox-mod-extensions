@@ -19,8 +19,8 @@ importers:
         version: link:../../utils/fomod-utils
     devDependencies:
       heybox-mod-api:
-        specifier: 1.9.0
-        version: 1.9.0
+        specifier: 1.17.0
+        version: 1.17.0
       typescript:
         specifier: ^5.7.0
         version: 5.9.3
@@ -35,8 +35,8 @@ importers:
         specifier: ^22.0.0
         version: 22.20.1
       heybox-mod-api:
-        specifier: 1.9.0
-        version: 1.9.0
+        specifier: 1.17.0
+        version: 1.17.0
       typescript:
         specifier: ^5.7.0
         version: 5.9.3
@@ -58,6 +58,15 @@ importers:
       heybox-mod-api:
         specifier: 1.9.0
         version: 1.9.0
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
+
+  extensions/HowToFish:
+    devDependencies:
+      heybox-mod-api:
+        specifier: 1.6.0-alpha1
+        version: 1.6.0-alpha1
       typescript:
         specifier: ^5.7.0
         version: 5.9.3
@@ -249,8 +258,8 @@ importers:
         specifier: ^22.0.0
         version: 22.20.1
       heybox-mod-api:
-        specifier: 1.9.0
-        version: 1.9.0
+        specifier: 1.17.0
+        version: 1.17.0
       typescript:
         specifier: ^5.7.0
         version: 5.9.3
@@ -427,6 +436,9 @@ packages:
     engines: {node: '>=18'}
     hasBin: true
 
+  heybox-mod-api@1.17.0:
+    resolution: {integrity: sha512-hCZJSE8CjCrETpdp/OtchZSVX4TOOVy1Ml9eO7DKgddHH2I7WgGxxLurdYGSwtN3z8MC3KMBun+Q7OfxG3oaTA==}
+
   heybox-mod-api@1.6.0-alpha1:
     resolution: {integrity: sha512-za1fIKxTwC/6VCDsHuu4nL34Z6LPjODJ4t495UExwphsgKMtU/IY7m9OO73wx4bl3iVPcFhUkMFamkza2Fn2Cg==}
 
@@ -559,6 +571,8 @@ snapshots:
       '@esbuild/win32-arm64': 0.25.12
       '@esbuild/win32-ia32': 0.25.12
       '@esbuild/win32-x64': 0.25.12
+
+  heybox-mod-api@1.17.0: {}
 
   heybox-mod-api@1.6.0-alpha1: {}
 

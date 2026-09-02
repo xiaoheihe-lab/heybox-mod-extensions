@@ -5,7 +5,7 @@ import type {
   LoadOrderContext,
   LoadOrderEntry,
   ManagedDeploymentMutation,
-} from './protocol'
+} from 'heybox-mod-api'
 
 const PREFIX_CAPACITY = 26 * 26 * 26
 

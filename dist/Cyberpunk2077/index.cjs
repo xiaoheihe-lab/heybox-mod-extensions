@@ -594,9 +594,8 @@ async function extractFomodRedmodAttributes(contextValue, context) {
     throw invalidFomodRedmod(`The selected FOMOD REDmod content is invalid: ${String(error?.message || error)}`, error);
   }
 }
-function registerFomodRedmodAttributeExtractor(contextValue) {
-  const context = contextValue;
-  context.registerPostInstallerAttributeExtractor(100, (payload) => extractFomodRedmodAttributes(contextValue, payload));
+function registerFomodRedmodAttributeExtractor(context) {
+  context.registerPostInstallerAttributeExtractor(100, (payload) => extractFomodRedmodAttributes(context, payload));
 }
 
 // src/ui.ts
@@ -739,11 +738,10 @@ var RedmodSteamLaunchOptionCoordinator = class {
 };
 
 // src/loadOrder/index.ts
-function registerRedmodLoadOrder(contextValue) {
-  const context = contextValue;
-  const launchOptions = new RedmodSteamLaunchOptionCoordinator(contextValue);
+function registerRedmodLoadOrder(context) {
+  const launchOptions = new RedmodSteamLaunchOptionCoordinator(context);
   context.registerAttributeExtractor(100, extractRedmodAttributes);
-  registerFomodRedmodAttributeExtractor(contextValue);
+  registerFomodRedmodAttributeExtractor(context);
   context.registerLoadOrder({
     id: REDMOD_LOAD_ORDER_PROVIDER_ID,
     gameId: GAME_ID,

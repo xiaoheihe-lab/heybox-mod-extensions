@@ -2,7 +2,7 @@ import fs from 'fs'
 import path from 'path'
 import { execFile } from 'child_process'
 import { REDMOD_DEPLOY_EXE, REDMOD_METADATA } from '../constants'
-import type { LoadOrderContext, LoadOrderEntry } from './protocol'
+import type { LoadOrderContext, LoadOrderEntry } from 'heybox-mod-api'
 import { getEnabledRedmodNames, REDMOD_LOAD_ORDER_PROVIDER_ID } from './provider'
 
 const H2077_DIR = 'H2077'

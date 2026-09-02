@@ -222,8 +222,7 @@ function deserializePakLoadOrder(context) {
 }
 
 // src/loadOrder/index.ts
-function registerPakLoadOrder(contextValue) {
-  const context = contextValue;
+function registerPakLoadOrder(context) {
   context.registerLoadOrder({
     id: PAK_LOAD_ORDER_PROVIDER_ID,
     gameId: GAME_ID,
@@ -235,7 +234,7 @@ function registerPakLoadOrder(contextValue) {
     modTypes: [MOD_TYPE_PAK, MOD_TYPE_FOMOD],
     isModRelevant: isPakLoadOrderModRelevant,
     deserializeLoadOrder: deserializePakLoadOrder,
-    serializeLoadOrder: (entries, loadOrderContext) => serializePakLoadOrder(contextValue, entries, loadOrderContext)
+    serializeLoadOrder: (entries, loadOrderContext) => serializePakLoadOrder(context, entries, loadOrderContext)
   });
   context.registerExtensionAction(GAME_ID, "deployPakLoadOrder", () => context.api.loadOrder.deploy(PAK_LOAD_ORDER_PROVIDER_ID));
 }
@@ -1220,8 +1219,7 @@ function extractFomodPakAttributes(context) {
   const pakFiles = context.instructions.filter((instruction) => instruction.type === "copy" && isPakModsDestination(instruction.destination)).map((instruction) => archiveBaseName(instruction.destination));
   return { [PAK_ATTRIBUTE]: [...new Set(pakFiles)] };
 }
-function registerFomodPakAttributeExtractor(contextValue) {
-  const context = contextValue;
+function registerFomodPakAttributeExtractor(context) {
   context.registerPostInstallerAttributeExtractor(100, extractFomodPakAttributes);
 }
 
