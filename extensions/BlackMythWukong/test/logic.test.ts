@@ -38,7 +38,7 @@ import { makeLoadOrderPrefix, planPakLoadOrderMutation, serializePakLoadOrder } 
 import { extractFomodPakAttributes } from '../src/loadOrder/fomod'
 import { registerPakLoadOrder } from '../src/loadOrder'
 import { deserializePakLoadOrder } from '../src/loadOrder/provider'
-import type { LoadOrderEntry } from '../src/loadOrder/protocol'
+import type { LoadOrderEntry } from 'heybox-mod-api'
 import { applyMutableFilePolicies, registerBlackMythWukongModTypes } from '../src/modTypes'
 import { getExtensionRequiredMods, getRequirementItems, getRequirementStatus } from '../src/requirements'
 

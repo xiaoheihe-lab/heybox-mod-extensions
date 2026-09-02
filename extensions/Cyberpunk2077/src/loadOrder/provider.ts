@@ -1,5 +1,5 @@
 import path from 'path'
-import type { LoadOrderContext, LoadOrderEntry, LoadOrderModSnapshot } from './protocol'
+import type { LoadOrderContext, LoadOrderEntry, LoadOrderModSnapshot } from 'heybox-mod-api'
 import type { RedmodMetadata } from '../redmod/metadata'
 
 export const REDMOD_LOAD_ORDER_PROVIDER_ID = 'redmod'

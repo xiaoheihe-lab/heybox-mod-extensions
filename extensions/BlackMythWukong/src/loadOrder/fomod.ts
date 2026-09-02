@@ -1,4 +1,7 @@
-import type { IExtensionContext } from 'heybox-mod-api'
+import type {
+  IExtensionContext,
+  PostInstallerAttributeContext,
+} from 'heybox-mod-api'
 import {
   MOD_TYPE_FOMOD,
   PAK_ATTRIBUTE,
@@ -10,25 +13,6 @@ import {
   archiveExtName,
   normalizeDeploymentPath,
 } from '../utils/archivePaths'
-
-interface FinalFileInstruction {
-  readonly type: 'copy' | 'generatefile'
-  readonly source?: string
-  readonly destination: string
-}
-
-interface PostInstallerAttributeContext {
-  installerTypeId: string
-  modTypeId: string
-  instructions: readonly FinalFileInstruction[]
-}
-
-interface PostInstallerCapableContext extends IExtensionContext {
-  registerPostInstallerAttributeExtractor(
-    priority: number,
-    extractor: (context: PostInstallerAttributeContext) => Record<string, unknown> | Promise<Record<string, unknown>>,
-  ): void
-}
 
 function isPakModsDestination(destination: string): boolean {
   const normalized = normalizeDeploymentPath(destination)
@@ -45,7 +29,6 @@ export function extractFomodPakAttributes(context: PostInstallerAttributeContext
   return { [PAK_ATTRIBUTE]: [...new Set(pakFiles)] }
 }
 
-export function registerFomodPakAttributeExtractor(contextValue: IExtensionContext): void {
-  const context = contextValue as PostInstallerCapableContext
+export function registerFomodPakAttributeExtractor(context: IExtensionContext): void {
   context.registerPostInstallerAttributeExtractor(100, extractFomodPakAttributes)
 }

@@ -3,16 +3,13 @@ import { GAME_ID, MOD_TYPE } from '../constants'
 import { extractRedmodAttributes } from '../redmod/attributes'
 import { serializeAndDeployRedmods } from './deployer'
 import { deserializeRedmodLoadOrder, isRedmodLoadOrderModRelevant, REDMOD_LOAD_ORDER_PROVIDER_ID } from './provider'
-import type { LoadOrderCapableContext } from './protocol'
 import { registerFomodRedmodAttributeExtractor } from '../redmod/fomodAttributes'
 import { RedmodSteamLaunchOptionCoordinator } from '../launchOptions'
-import type { SteamLaunchOptionCapableContext } from '../launchOptions'
 
-export function registerRedmodLoadOrder(contextValue: IExtensionContext): void {
-  const context = contextValue as LoadOrderCapableContext
-  const launchOptions = new RedmodSteamLaunchOptionCoordinator(contextValue as SteamLaunchOptionCapableContext)
+export function registerRedmodLoadOrder(context: IExtensionContext): void {
+  const launchOptions = new RedmodSteamLaunchOptionCoordinator(context)
   context.registerAttributeExtractor(100, extractRedmodAttributes)
-  registerFomodRedmodAttributeExtractor(contextValue)
+  registerFomodRedmodAttributeExtractor(context)
   context.registerLoadOrder({
     id: REDMOD_LOAD_ORDER_PROVIDER_ID,
     gameId: GAME_ID,

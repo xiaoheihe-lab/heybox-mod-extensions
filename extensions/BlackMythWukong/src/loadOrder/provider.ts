@@ -1,5 +1,5 @@
 import { MOD_TYPE_FOMOD, MOD_TYPE_PAK, PAK_ATTRIBUTE } from '../constants'
-import type { LoadOrderContext, LoadOrderEntry, LoadOrderModSnapshot } from './protocol'
+import type { LoadOrderContext, LoadOrderEntry, LoadOrderModSnapshot } from 'heybox-mod-api'
 
 function modDisplayName(mod: LoadOrderModSnapshot): string {
   const metaInfo = mod.metaInfo || {}

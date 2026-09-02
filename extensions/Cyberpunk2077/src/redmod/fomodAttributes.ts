@@ -1,8 +1,7 @@
-import type { IExtensionContext } from 'heybox-mod-api'
+import type { IExtensionContext, PostInstallerAttributeContext } from 'heybox-mod-api'
 import { MOD_TYPE } from '../constants'
 import { normalizeRelativePath, sanitizePackageName } from '../package'
 import type { PackageFile, PreparedPackage } from '../types'
-import type { PostInstallerAttributeContext, PostInstallerCapableContext } from '../postInstaller/protocol'
 import { findRedmodRoots, metadataFromRoots, validateRedmodRoot } from './metadata'
 
 function invalidFomodRedmod(message: string, cause?: unknown): Error {
@@ -82,7 +81,6 @@ export async function extractFomodRedmodAttributes(
   }
 }
 
-export function registerFomodRedmodAttributeExtractor(contextValue: IExtensionContext): void {
-  const context = contextValue as PostInstallerCapableContext
-  context.registerPostInstallerAttributeExtractor(100, (payload) => extractFomodRedmodAttributes(contextValue, payload))
+export function registerFomodRedmodAttributeExtractor(context: IExtensionContext): void {
+  context.registerPostInstallerAttributeExtractor(100, (payload) => extractFomodRedmodAttributes(context, payload))
 }

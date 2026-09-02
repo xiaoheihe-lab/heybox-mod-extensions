@@ -1,4 +1,4 @@
-import type { IExtensionContext } from 'heybox-mod-api'
+import type { IExtensionContext, SteamPrerequisiteRegistration } from 'heybox-mod-api'
 
 import {
   GAME_ID,
@@ -8,7 +8,6 @@ import {
   REDMOD_STEAM_APP_ID,
   REDMOD_STEAM_HEADER_IMAGE,
 } from '../constants'
-import type { SteamPrerequisiteRegistrationCompat } from './protocol'
 
 async function fileExists(context: IExtensionContext, filePath: string): Promise<boolean> {
   try {
@@ -45,7 +44,7 @@ export async function getRedmodStatus(context: IExtensionContext, gamePath?: str
 
 export function createRedmodSteamPrerequisite(
   context: IExtensionContext,
-): SteamPrerequisiteRegistrationCompat {
+): SteamPrerequisiteRegistration {
   return {
     id: 'cyberpunk-redmod',
     steamAppId: REDMOD_STEAM_APP_ID,
