@@ -216,6 +216,15 @@ importers:
         specifier: ^5.7.0
         version: 5.9.3
 
+  extensions/Valheim:
+    devDependencies:
+      heybox-mod-api:
+        specifier: 1.17.0
+        version: 1.17.0
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
+
   extensions/WitchsApocalypticJourney:
     devDependencies:
       '@heybox-mod-extensions/shared-utils':
