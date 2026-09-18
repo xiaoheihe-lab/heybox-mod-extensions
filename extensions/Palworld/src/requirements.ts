@@ -7,6 +7,7 @@ import {
   UE4SS_DLL,
   UE4SS_DWMAPI,
   UE4SS_MOD_ID,
+  UE4SS_RUNTIME_PATH,
   UNREAL_PAK_EXE,
   UNREAL_PAK_TOOL_MOD_ID,
   UNREAL_PAK_TOOL_PATH,
@@ -54,7 +55,7 @@ export function getRequirementItems() {
 export async function getRequirementStatus(context: IExtensionContext, gamePath?: string): Promise<RequirementStatus> {
   const resolvedGamePath = String(gamePath || await findGamePath(context) || '')
   const path = context.api.util.path
-  const ue4ssDllPath = resolvedGamePath ? path.join(resolvedGamePath, PAL_WIN64_PATH, UE4SS_DLL) : ''
+  const ue4ssDllPath = resolvedGamePath ? path.join(resolvedGamePath, UE4SS_RUNTIME_PATH, UE4SS_DLL) : ''
   const dwmapiPath = resolvedGamePath ? path.join(resolvedGamePath, PAL_WIN64_PATH, UE4SS_DWMAPI) : ''
   const unrealPakPath = resolvedGamePath ? path.join(resolvedGamePath, UNREAL_PAK_TOOL_PATH, UNREAL_PAK_EXE) : ''
 
