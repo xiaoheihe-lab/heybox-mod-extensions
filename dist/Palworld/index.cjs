@@ -95,7 +95,7 @@ function getRequirementItems() {
 async function getRequirementStatus(context, gamePath) {
   const resolvedGamePath = String(gamePath || await findGamePath(context) || "");
   const path5 = context.api.util.path;
-  const ue4ssDllPath = resolvedGamePath ? path5.join(resolvedGamePath, PAL_WIN64_PATH, UE4SS_DLL) : "";
+  const ue4ssDllPath = resolvedGamePath ? path5.join(resolvedGamePath, UE4SS_RUNTIME_PATH, UE4SS_DLL) : "";
   const dwmapiPath = resolvedGamePath ? path5.join(resolvedGamePath, PAL_WIN64_PATH, UE4SS_DWMAPI) : "";
   const unrealPakPath = resolvedGamePath ? path5.join(resolvedGamePath, UNREAL_PAK_TOOL_PATH, UNREAL_PAK_EXE) : "";
   const hasUe4ss = !!resolvedGamePath && await fileExists(context, ue4ssDllPath) && await fileExists(context, dwmapiPath);
