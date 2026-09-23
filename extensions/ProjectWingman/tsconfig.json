@@ -1,0 +1,8 @@
+{
+  "extends": "../../internal/build/tsconfig.base.json",
+  "include": [
+    "index.ts",
+    "pak-installer.ts",
+    "root-installer.ts"
+  ]
+}
