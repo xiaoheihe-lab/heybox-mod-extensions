@@ -26,23 +26,35 @@ module.exports = __toCommonJS(index_exports);
 var GAME_ID = 4348910;
 var MELONLOADER_REQUIREMENT_MOD_ID = "129002";
 var EXECUTABLE = "Probably Stolen.exe";
-var REQUIRED_GAME_FILES = [
-  EXECUTABLE,
-  "UnityPlayer.dll",
-  "GameAssembly.dll",
-  "Probably Stolen_Data/il2cpp_data/Metadata/global-metadata.dat"
-];
+var REQUIRED_GAME_FILES = [EXECUTABLE, "UnityPlayer.dll"];
 var modType = (kind) => `${GAME_ID}-${kind}`;
-var RUNTIME_FILES = {
-  melonloader: ["version.dll", "MelonLoader/net6/MelonLoader.dll", "MelonLoader/net6/MelonLoader.runtimeconfig.json"],
-  bepinex: [
-    "winhttp.dll",
-    "doorstop_config.ini",
-    "BepInEx/core/BepInEx.Unity.IL2CPP.dll",
-    "BepInEx/core/BepInEx.Core.dll",
-    "dotnet/coreclr.dll"
-  ]
+var BACKENDS = ["il2cpp", "mono"];
+var BACKEND_FILES = {
+  il2cpp: ["GameAssembly.dll", "Probably Stolen_Data/il2cpp_data/Metadata/global-metadata.dat"],
+  mono: ["Probably Stolen_Data/Managed/Assembly-CSharp.dll"]
 };
+var BACKEND_LABEL = { il2cpp: "IL2CPP", mono: "Mono" };
+var INJECTOR = { melonloader: "version.dll", bepinex: "winhttp.dll" };
+var RUNTIME_LAYOUTS = {
+  melonloader: {
+    il2cpp: [["version.dll", "MelonLoader/net6/MelonLoader.dll", "MelonLoader/net6/MelonLoader.runtimeconfig.json"]],
+    mono: [["version.dll", "MelonLoader/net35/MelonLoader.dll"]]
+  },
+  bepinex: {
+    il2cpp: [[
+      "winhttp.dll",
+      "doorstop_config.ini",
+      "BepInEx/core/BepInEx.Unity.IL2CPP.dll",
+      "BepInEx/core/BepInEx.Core.dll",
+      "dotnet/coreclr.dll"
+    ]],
+    mono: [
+      ["winhttp.dll", "doorstop_config.ini", "BepInEx/core/BepInEx.dll"],
+      ["winhttp.dll", "doorstop_config.ini", "BepInEx/core/BepInEx.Unity.Mono.dll", "BepInEx/core/BepInEx.Core.dll"]
+    ]
+  }
+};
+var runtimeLayouts = (loader, backend) => backend ? RUNTIME_LAYOUTS[loader][backend] : BACKENDS.flatMap((b) => RUNTIME_LAYOUTS[loader][b]);
 var ROOTS = new Map(["Mods", "Plugins", "UserData", "UserLibs", "BepInEx"].map((p) => [p.toLowerCase(), p]));
 var BLOCKED = /\.(exe|bat|cmd|ps1|vbs|msi|lnk|reg|sh)$/i;
 var INJECTORS = /* @__PURE__ */ new Set(["version.dll", "winhttp.dll", "dobby.dll", "gameassembly.dll", "unityplayer.dll"]);
@@ -54,14 +66,15 @@ function safePath(source) {
   if (parts.some((p) => !p || p === "." || p === ".." || /[. ]$/.test(p) || /[<>"|?*]/.test(p) || /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(p))) return void 0;
   return value;
 }
-function runtimeRoot(files, loader) {
+function runtimeRoot(files, loader, backend) {
   const paths = files.map(safePath).filter((p) => !!p);
   const names = new Set(paths.map((p) => p.toLowerCase()));
-  const marker = RUNTIME_FILES[loader][0].toLowerCase();
+  const marker = INJECTOR[loader].toLowerCase();
   for (const path of paths) {
     if (path.split("/").at(-1)?.toLowerCase() !== marker) continue;
     const prefix = path.slice(0, -marker.length);
-    if (RUNTIME_FILES[loader].every((p) => names.has((prefix + p).toLowerCase()))) return prefix;
+    if (runtimeLayouts(loader, backend).some((layout) => layout.every((p) => names.has((prefix + p).toLowerCase()))))
+      return prefix;
   }
   return void 0;
 }
@@ -80,9 +93,11 @@ function checkedInstructions(instructions) {
   }
   return instructions;
 }
-function runtimeInstructions(files, loader) {
-  const prefix = runtimeRoot(files, loader);
-  if (prefix === void 0) throw new Error("\u8BF7\u9009\u62E9\u5B8C\u6574\u7684 Windows x64 IL2CPP \u9884\u8F7D\u5668 ZIP\u3002");
+function runtimeInstructions(files, loader, backend) {
+  const prefix = runtimeRoot(files, loader, backend);
+  if (prefix === void 0) {
+    throw new Error(`\u8BF7\u9009\u62E9\u5B8C\u6574\u7684 Windows x64 ${backend ? `${BACKEND_LABEL[backend]} ` : ""}\u9884\u8F7D\u5668 ZIP\u3002`);
+  }
   const result = [];
   for (const source of files) {
     const path = safePath(source);
@@ -128,7 +143,16 @@ async function main(context) {
       return false;
     }
   };
-  const validGame = async (path) => (await Promise.all(REQUIRED_GAME_FILES.map((p) => exists(path, p)))).every(Boolean);
+  const missing = async (root, files) => {
+    const present = await Promise.all(files.map((p) => exists(root, p)));
+    return files.filter((_, i) => !present[i]);
+  };
+  const detectBackend = async (path) => {
+    if ((await missing(path, REQUIRED_GAME_FILES)).length) return void 0;
+    for (const backend of BACKENDS) if (!(await missing(path, BACKEND_FILES[backend])).length) return backend;
+    return void 0;
+  };
+  const validGame = async (path) => !!await detectBackend(path);
   const findGamePath = async () => {
     if (selectedPath && await validGame(selectedPath)) return selectedPath;
     const found = await context.api.util.GameStoreHelper.findByAppId(GAME_ID);
@@ -140,19 +164,27 @@ async function main(context) {
   };
   const getLoaderStatus = async () => {
     const gamePath = await findGamePath();
+    const backend = gamePath ? await detectBackend(gamePath) : void 0;
     const read = async (loader) => {
-      const missingFiles = [];
-      for (const file of RUNTIME_FILES[loader]) if (!gamePath || !await exists(gamePath, file)) missingFiles.push(file);
+      const layouts = RUNTIME_LAYOUTS[loader][backend ?? "il2cpp"];
+      let missingFiles = layouts[0];
+      if (gamePath) {
+        for (const layout of layouts) {
+          const result = await missing(gamePath, layout);
+          if (result.length < missingFiles.length) missingFiles = result;
+        }
+      }
       return {
-        installed: missingFiles.length === 0,
+        installed: !!gamePath && missingFiles.length === 0,
         missingFiles,
-        injectorPresent: !!gamePath && await exists(gamePath, RUNTIME_FILES[loader][0])
+        injectorPresent: !!gamePath && await exists(gamePath, INJECTOR[loader])
       };
     };
     const melonloader = await read("melonloader");
     const bepinex = await read("bepinex");
     return {
       gamePath: gamePath ?? "",
+      backend: backend ?? "",
       melonloader,
       bepinex,
       conflict: melonloader.injectorPresent && bepinex.injectorPresent
@@ -188,7 +220,7 @@ async function main(context) {
     queryPath: findGamePath,
     setup: async (discovery) => {
       const candidate = discovery?.path || discovery?.gamePath;
-      if (candidate && !await validGame(candidate)) throw new Error("\u8BF7\u9009\u62E9\u5305\u542B Probably Stolen.exe \u7684 IL2CPP \u6E38\u620F\u76EE\u5F55\u3002");
+      if (candidate && !await validGame(candidate)) throw new Error("\u8BF7\u9009\u62E9\u5305\u542B Probably Stolen.exe \u7684\u6E38\u620F\u76EE\u5F55\u3002");
       selectedPath = candidate || await findGamePath();
       return getExtensionRequiredMods();
     },
@@ -208,7 +240,7 @@ async function main(context) {
       supportedGame,
       () => "{gamePath}",
       () => false,
-      { name: loader === "melonloader" ? "MelonLoader IL2CPP Runtime" : "BepInEx 6 IL2CPP Runtime" }
+      { name: loader === "melonloader" ? "MelonLoader Runtime" : "BepInEx Runtime" }
     );
     context.registerInstaller(
       modType(loader),
@@ -220,7 +252,8 @@ async function main(context) {
         const status = await getLoaderStatus();
         const other = loader === "melonloader" ? "bepinex" : "melonloader";
         if (status[other].injectorPresent) throw new Error(`\u8BF7\u5148\u7981\u7528\u6216\u79FB\u9664 ${other} \u9884\u8F7D\u5668\uFF0C\u518D\u5B89\u88C5 ${loader}\u3002`);
-        return { instructions: runtimeInstructions(files, loader), modType: modType(loader) };
+        const backend = status.backend || void 0;
+        return { instructions: runtimeInstructions(files, loader, backend), modType: modType(loader) };
       }
     );
   }
