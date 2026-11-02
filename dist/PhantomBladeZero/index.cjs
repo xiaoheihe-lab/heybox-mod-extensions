@@ -21,20 +21,34 @@ var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: tru
 var index_exports = {};
 __export(index_exports, {
   default: () => src_default,
+  installBinaries: () => installBinaries,
   installCombo: () => installCombo,
+  installContent: () => installContent,
   installDll: () => installDll,
   installLogic: () => installLogic,
+  installLua: () => installLua,
   installPak: () => installPak,
+  installPakAlt: () => installPakAlt,
+  installPreset: () => installPreset,
+  installReshade: () => installReshade,
   installRoot: () => installRoot,
   installScript: () => installScript,
   installUe4ss: () => installUe4ss,
+  installUe4ssFolder: () => installUe4ssFolder,
+  testBinaries: () => testBinaries,
   testCombo: () => testCombo,
+  testContent: () => testContent,
   testDll: () => testDll,
   testLogic: () => testLogic,
+  testLua: () => testLua,
   testPak: () => testPak,
+  testPakAlt: () => testPakAlt,
+  testPreset: () => testPreset,
+  testReshade: () => testReshade,
   testRoot: () => testRoot,
   testScript: () => testScript,
-  testUe4ss: () => testUe4ss
+  testUe4ss: () => testUe4ss,
+  testUe4ssFolder: () => testUe4ssFolder
 });
 module.exports = __toCommonJS(index_exports);
 
@@ -53,18 +67,31 @@ var ROOT_DIRECTORIES = ["Engine", "ProjectPBZ", "platform", "steam"];
 var UE4SS_DLL = "UE4SS.dll";
 var UE4SS_DWMAPI = "dwmapi.dll";
 var UE4SS_SETTINGS = "UE4SS-settings.ini";
+var UE4SS_PROXY_DLLS = [UE4SS_DWMAPI, "xinput1_3.dll", "xinput1_4.dll"];
 var UE4SS_REQUIREMENT_MOD_ID = "128413";
 var MODS_FILE = "mods.txt";
 var MODS_FILE_BACKUP = "mods.txt.original";
 var ENABLED_FILE = "enabled.txt";
 var LUA_EXTENSIONS = [".lua"];
 var DLL_EXTENSIONS = [".dll"];
+var UE_CONFIG_INI_NAMES = [
+  "engine.ini",
+  "game.ini",
+  "gameusersettings.ini",
+  "input.ini",
+  "scalability.ini"
+];
+var CONTENT_ROOT_DIRECTORIES = ["Content", "Config", "Binaries"];
 var MOD_TYPE_UE4SS = `${GAME_ID}-ue4ss`;
 var MOD_TYPE_SCRIPT = `${GAME_ID}-ue4ss-script`;
 var MOD_TYPE_DLL = `${GAME_ID}-ue4ss-dll`;
+var MOD_TYPE_UE4SS_FOLDER = `${GAME_ID}-ue4ss-mod-folder`;
 var MOD_TYPE_COMBO = `${GAME_ID}-combo`;
 var MOD_TYPE_LOGIC = `${GAME_ID}-logic-mod`;
 var MOD_TYPE_PAK = `${GAME_ID}-pak`;
+var MOD_TYPE_PAK_ALT = `${GAME_ID}-pak-alt`;
+var MOD_TYPE_BINARIES = `${GAME_ID}-binaries`;
+var MOD_TYPE_CONTENT = `${GAME_ID}-content`;
 var MOD_TYPE_ROOT = `${GAME_ID}-root`;
 var MOD_TYPE_PRIORITY = {
   ue4ss: 200,
@@ -72,7 +99,11 @@ var MOD_TYPE_PRIORITY = {
   logic: 185,
   script: 180,
   dll: 175,
+  ue4ssFolder: 172,
   pak: 170,
+  pakAlt: 168,
+  content: 165,
+  binaries: 160,
   root: 100
 };
 var INSTALLER_PRIORITY = {
@@ -81,7 +112,11 @@ var INSTALLER_PRIORITY = {
   logic: 11,
   script: 14,
   dll: 15,
+  ue4ssFolder: 16,
+  content: 17,
+  pakAlt: 25,
   pak: 30,
+  binaries: 35,
   root: 40
 };
 
@@ -145,6 +180,7 @@ function getStagingSourcePath(file, stagingPath, sourcePathByFile) {
 // extensions/PhantomBladeZero/src/installers.ts
 var PATCH_EXTENSIONS = [".pak", ".ucas", ".utoc", ".sig"];
 var FOMOD_CONFIG = /(^|\/)fomod\/moduleconfig\.xml$/i;
+var CONTENT_MARKERS = new Set(CONTENT_ROOT_DIRECTORIES.map((directory) => directory.toLowerCase()));
 function isPbz(gameId) {
   return Number(gameId) === GAME_ID;
 }
@@ -180,9 +216,6 @@ function hasInstallablePak(files) {
     if (extensions.has(".pak") || extensions.has(".utoc") && extensions.has(".ucas")) return true;
   }
   return false;
-}
-function isUe4ssRuntime(files) {
-  return hasBaseName(files, UE4SS_DWMAPI) && hasBaseName(files, UE4SS_DLL);
 }
 function pushUnique(instructions, instruction) {
   const destination = String(instruction.destination).toLowerCase();
@@ -271,21 +304,44 @@ function pakInstructions(group) {
   }
   return instructions;
 }
-function findUe4ssAnchor(files) {
+function isProxyDll(filePath) {
+  const base = archiveBaseName(filePath).toLowerCase();
+  return UE4SS_PROXY_DLLS.some((proxy) => proxy.toLowerCase() === base);
+}
+function isSettingsFile(filePath) {
+  return archiveBaseName(filePath).toLowerCase() === UE4SS_SETTINGS.toLowerCase();
+}
+function findLoaderAnchor(files) {
   for (const file of files) {
     const filePath = safeArchivePath(file);
-    if (!filePath || archiveBaseName(filePath).toLowerCase() !== UE4SS_DWMAPI) continue;
+    if (!filePath) continue;
+    if (!isProxyDll(filePath) && !isSettingsFile(filePath)) continue;
     const rootSegments = splitArchivePath(filePath).slice(0, -1);
-    const dllSegments = [...rootSegments, "ue4ss", UE4SS_DLL];
-    const hasRuntime = files.some((candidate) => {
+    const proxies = [];
+    let hasRuntime = false;
+    for (const candidate of files) {
       const candidatePath = safeArchivePath(candidate);
-      if (!candidatePath) return false;
+      if (!candidatePath) continue;
       const segments = splitArchivePath(candidatePath);
-      return segments.length === dllSegments.length && dllSegments.every((segment, index) => segments[index].toLowerCase() === segment.toLowerCase());
-    });
-    if (hasRuntime) return { rootSegments, dwmapiFile: file };
+      const inRoot = rootSegments.every(
+        (segment, index) => segments[index]?.toLowerCase() === segment.toLowerCase()
+      );
+      if (!inRoot) continue;
+      const relative = segments.slice(rootSegments.length);
+      if (isProxyDll(candidatePath) && relative.length === 1) proxies.push(candidate);
+      if (relative.length === 1 && archiveBaseName(candidatePath).toLowerCase() === UE4SS_DLL.toLowerCase()) {
+        hasRuntime = true;
+      }
+      if (relative.length === 2 && relative[0].toLowerCase() === "ue4ss" && archiveBaseName(candidatePath).toLowerCase() === UE4SS_DLL.toLowerCase()) {
+        hasRuntime = true;
+      }
+    }
+    if (hasRuntime) return { rootSegments, proxyFiles: proxies };
   }
   return null;
+}
+function isLoaderLayout(files) {
+  return findLoaderAnchor(files) !== null;
 }
 function findLogicAnchor(files) {
   for (const file of files) {
@@ -346,14 +402,6 @@ function collectUe4ssModRoots(files) {
   }
   return found;
 }
-function isDedicatedModLayout(filePath) {
-  const segments = splitArchivePath(filePath);
-  const lower = segments.map((segment) => segment.toLowerCase());
-  if (lower.includes("ue4ss")) return true;
-  if (lower.includes("logicmods")) return true;
-  if (isPakLike(filePath) && lower.includes("projectpbz") && lower.includes("paks")) return true;
-  return false;
-}
 function findRootAnchor(file) {
   const segments = splitArchivePath(file);
   const roots = new Set(ROOT_DIRECTORIES.map((directory) => directory.toLowerCase()));
@@ -362,99 +410,245 @@ function findRootAnchor(file) {
   }
   return null;
 }
-function testUe4ss(files, gameId) {
-  return testResult(isPbz(gameId) && !isFomodPackage(files) && findUe4ssAnchor(files) !== null);
-}
-function testCombo(files, gameId) {
-  return testResult(
-    isPbz(gameId) && !isFomodPackage(files) && !isUe4ssRuntime(files) && hasInstallablePak(files) && findUe4ssModRoot(files) !== null
-  );
-}
-function testLogic(files, gameId) {
-  return testResult(isPbz(gameId) && !isFomodPackage(files) && findLogicAnchor(files) !== null);
-}
-function testScript(files, gameId) {
-  return testResult(
-    isPbz(gameId) && !isFomodPackage(files) && !isUe4ssRuntime(files) && findUe4ssModRoot(files, SCRIPT_MARKER) !== null
-  );
-}
-function testDll(files, gameId) {
-  return testResult(
-    isPbz(gameId) && !isFomodPackage(files) && !isUe4ssRuntime(files) && findUe4ssModRoot(files, DLL_MARKER) !== null
-  );
-}
-function testPak(files, gameId) {
-  const supported = isPbz(gameId) && !isFomodPackage(files) && hasInstallablePak(files) && findLogicAnchor(files) === null && findUe4ssModRoot(files) === null && !findUe4ssAnchor(files);
-  return testResult(supported);
-}
-function testRoot(files, gameId) {
-  if (!isPbz(gameId) || isFomodPackage(files)) return testResult(false);
-  if (findUe4ssAnchor(files) !== null) return testResult(false);
-  const anchored = files.some((file) => {
+function isGameRelativeLayout(files) {
+  return files.some((file) => {
     const filePath = safeArchivePath(file);
-    if (!filePath || !isArchiveFile(file, files) || isDedicatedModLayout(filePath)) return false;
-    return findRootAnchor(filePath) !== null;
+    return Boolean(filePath && isArchiveFile(file, files) && findRootAnchor(filePath) !== null);
   });
-  return testResult(anchored);
 }
-function readTextSettings(context, sourcePath, encoding = "utf8") {
-  return context.api.util.fs.readFile(sourcePath, { encoding });
+function findContentAnchor(filePaths) {
+  const parsed = filePaths.map(splitArchivePath).filter((segments) => segments.length > 0);
+  if (parsed.length === 0) return null;
+  const at = (segments, index) => segments.length > index + 1 && CONTENT_MARKERS.has(segments[index].toLowerCase());
+  if (parsed.some((segments) => at(segments, 0)) && parsed.every((segments) => segments.length === 1 || CONTENT_MARKERS.has(segments[0].toLowerCase()))) {
+    return 0;
+  }
+  const top = parsed[0][0].toLowerCase();
+  if (parsed.every((segments) => segments[0].toLowerCase() === top) && parsed.every((segments) => segments.length >= 2) && parsed.some((segments) => at(segments, 1))) {
+    return 1;
+  }
+  return null;
 }
-async function installUe4ss(context, files, stagingPath, options) {
-  const anchor = findUe4ssAnchor(files);
-  if (!anchor) return { instructions: [], modType: MOD_TYPE_UE4SS };
-  const instructions = [];
+function findPaksAnchor(files) {
+  for (const file of files) {
+    const filePath = safeArchivePath(file);
+    if (!filePath || !isPakLike(filePath)) continue;
+    const idx = findSegment(filePath, "Paks");
+    if (idx < 0) continue;
+    const segments = splitArchivePath(filePath);
+    if (segments.some((segment) => segment.toLowerCase() === "~mods")) continue;
+    if (segments.some((segment) => segment.toLowerCase() === "logicmods")) continue;
+    return idx;
+  }
+  return null;
+}
+function findMarkerDir(files, predicate) {
+  for (const file of files) {
+    const filePath = safeArchivePath(file);
+    if (!filePath || !isArchiveFile(file, files) || !predicate(filePath)) continue;
+    return splitArchivePath(filePath).slice(0, -1);
+  }
+  return null;
+}
+function isReShadeIni(filePath) {
+  return archiveBaseName(filePath).toLowerCase() === "reshade.ini";
+}
+function isUeConfigIni(filePath) {
+  return UE_CONFIG_INI_NAMES.includes(archiveBaseName(filePath).toLowerCase());
+}
+function isLoosePresetIni(filePath) {
+  return archiveExtName(filePath) === ".ini" && !isReShadeIni(filePath) && !isUeConfigIni(filePath);
+}
+function filesUnderRoot(files, rootSegments) {
+  const result = [];
   for (const file of files) {
     const filePath = safeArchivePath(file);
     if (!filePath || !isArchiveFile(file, files)) continue;
     const segments = splitArchivePath(filePath);
-    const inRoot = anchor.rootSegments.every((segment, index) => segments[index]?.toLowerCase() === segment.toLowerCase());
+    const inRoot = rootSegments.every(
+      (segment, index) => segments[index]?.toLowerCase() === segment.toLowerCase()
+    );
     if (!inRoot) continue;
-    const relative = segments.slice(anchor.rootSegments.length).join("/");
+    const relative = segments.slice(rootSegments.length).join("/");
+    if (!relative) continue;
+    result.push({ source: file, relative });
+  }
+  return result;
+}
+function deploySubtree(files, rootSegments, placeAt) {
+  return filesUnderRoot(files, rootSegments).map(({ source, relative }) => ({
+    type: "copy",
+    source,
+    destination: archiveJoin(placeAt, relative)
+  }));
+}
+function testUe4ss(files, gameId) {
+  return testResult(
+    isPbz(gameId) && !isFomodPackage(files) && !isGameRelativeLayout(files) && isLoaderLayout(files)
+  );
+}
+function testCombo(files, gameId) {
+  return testResult(
+    isPbz(gameId) && !isFomodPackage(files) && !isLoaderLayout(files) && !isGameRelativeLayout(files) && hasInstallablePak(files) && findUe4ssModRoot(files) !== null
+  );
+}
+function testLogic(files, gameId) {
+  return testResult(
+    isPbz(gameId) && !isFomodPackage(files) && !isLoaderLayout(files) && !isGameRelativeLayout(files) && findLogicAnchor(files) !== null
+  );
+}
+function testScript(files, gameId) {
+  return testResult(
+    isPbz(gameId) && !isFomodPackage(files) && !isLoaderLayout(files) && !isGameRelativeLayout(files) && findUe4ssModRoot(files, SCRIPT_MARKER) !== null
+  );
+}
+function testDll(files, gameId) {
+  return testResult(
+    isPbz(gameId) && !isFomodPackage(files) && !isLoaderLayout(files) && !isGameRelativeLayout(files) && findUe4ssModRoot(files, DLL_MARKER) !== null
+  );
+}
+function testUe4ssFolder(files, gameId) {
+  if (!isPbz(gameId) || isFomodPackage(files) || isLoaderLayout(files)) return testResult(false);
+  if (isGameRelativeLayout(files)) return testResult(false);
+  if (findUe4ssModRoot(files) !== null) return testResult(false);
+  if (hasInstallablePak(files)) return testResult(false);
+  const anchor = findMarkerDir(files, (filePath) => archiveBaseName(filePath).toLowerCase() === ENABLED_FILE.toLowerCase());
+  return testResult(anchor !== null && anchor.length > 0);
+}
+function testLua(files, gameId) {
+  if (!isPbz(gameId) || isFomodPackage(files) || isLoaderLayout(files)) return testResult(false);
+  if (isGameRelativeLayout(files)) return testResult(false);
+  if (findUe4ssModRoot(files) !== null || hasInstallablePak(files)) return testResult(false);
+  if (hasBaseName(files, ENABLED_FILE)) return testResult(false);
+  return testResult(findMarkerDir(files, (filePath) => archiveExtName(filePath) === ".lua") !== null);
+}
+function testContent(files, gameId) {
+  if (!isPbz(gameId) || isFomodPackage(files) || isLoaderLayout(files)) return testResult(false);
+  if (isGameRelativeLayout(files)) return testResult(false);
+  const paths = collectEntries(files).map((entry) => entry.file);
+  return testResult(findContentAnchor(paths) !== null);
+}
+function testPakAlt(files, gameId) {
+  if (!isPbz(gameId) || isFomodPackage(files) || isLoaderLayout(files)) return testResult(false);
+  if (isGameRelativeLayout(files)) return testResult(false);
+  if (!hasInstallablePak(files)) return testResult(false);
+  if (findLogicAnchor(files) !== null) return testResult(false);
+  return testResult(findPaksAnchor(files) !== null);
+}
+function testPak(files, gameId) {
+  if (!isPbz(gameId) || isFomodPackage(files) || isLoaderLayout(files)) return testResult(false);
+  if (isGameRelativeLayout(files)) return testResult(false);
+  if (!hasInstallablePak(files)) return testResult(false);
+  if (findLogicAnchor(files) !== null) return testResult(false);
+  if (findPaksAnchor(files) !== null) return testResult(false);
+  const paths = collectEntries(files).map((entry) => entry.file);
+  if (findContentAnchor(paths) !== null) return testResult(false);
+  if (findUe4ssModRoot(files) !== null) return testResult(false);
+  if (hasBaseName(files, ENABLED_FILE)) return testResult(false);
+  return testResult(true);
+}
+function testReshade(files, gameId) {
+  if (!isPbz(gameId) || isFomodPackage(files) || isLoaderLayout(files)) return testResult(false);
+  if (isGameRelativeLayout(files)) return testResult(false);
+  if (hasInstallablePak(files)) return testResult(false);
+  return testResult(hasBaseName(files, "ReShade.ini"));
+}
+function testPreset(files, gameId) {
+  if (!isPbz(gameId) || isFomodPackage(files) || isLoaderLayout(files)) return testResult(false);
+  if (isGameRelativeLayout(files)) return testResult(false);
+  if (hasInstallablePak(files) || hasBaseName(files, ENABLED_FILE)) return testResult(false);
+  if (hasBaseName(files, "ReShade.ini")) return testResult(false);
+  if (findUe4ssModRoot(files) !== null) return testResult(false);
+  return testResult(findMarkerDir(files, isLoosePresetIni) !== null);
+}
+function testBinaryDll(files, gameId) {
+  if (!isPbz(gameId) || isFomodPackage(files) || isLoaderLayout(files)) return testResult(false);
+  if (isGameRelativeLayout(files)) return testResult(false);
+  if (hasInstallablePak(files) || hasBaseName(files, ENABLED_FILE)) return testResult(false);
+  if (findUe4ssModRoot(files) !== null) return testResult(false);
+  const hasReshade = hasBaseName(files, "ReShade.ini");
+  if (hasReshade) return testResult(false);
+  const paths = collectEntries(files).map((entry) => entry.file);
+  if (findContentAnchor(paths) !== null) return testResult(false);
+  return testResult(findMarkerDir(files, (filePath) => archiveExtName(filePath) === ".dll") !== null);
+}
+function testRoot(files, gameId) {
+  if (!isPbz(gameId) || isFomodPackage(files)) return testResult(false);
+  return testResult(isGameRelativeLayout(files));
+}
+function testUe4ssFolderOrLua(files, gameId) {
+  const folder = testUe4ssFolder(files, gameId);
+  return folder.supported ? folder : testLua(files, gameId);
+}
+function installUe4ssFolderOrLua(files, stagingPath) {
+  return testUe4ssFolder(files, GAME_ID).supported ? installUe4ssFolder(files, stagingPath) : installLua(files, stagingPath);
+}
+function testBinaries(files, gameId) {
+  const reshade = testReshade(files, gameId);
+  if (reshade.supported) return reshade;
+  const preset = testPreset(files, gameId);
+  if (preset.supported) return preset;
+  return testBinaryDll(files, gameId);
+}
+function installBinaries(files) {
+  if (testReshade(files, GAME_ID).supported) return installReshade(files);
+  if (testPreset(files, GAME_ID).supported) return installPreset(files);
+  return installBinaryDll(files);
+}
+function readTextSettings(context, sourcePath, encoding = "utf8") {
+  return context.api.util.fs.readFile(sourcePath, { encoding });
+}
+async function rewriteSettings(context, file, stagingPath, options, destination) {
+  try {
+    const sourcePath = getStagingSourcePath(file, stagingPath, options?.sourcePathByFile);
+    const data = String(await readTextSettings(context, sourcePath));
+    return {
+      type: "generatefile",
+      data: data.replace(/bUseUObjectArrayCache\s*=\s*true/gim, "bUseUObjectArrayCache = false"),
+      destination
+    };
+  } catch {
+    return { type: "copy", source: file, destination };
+  }
+}
+async function installUe4ss(context, files, stagingPath, options) {
+  const anchor = findLoaderAnchor(files);
+  if (!anchor) return { instructions: [], modType: MOD_TYPE_UE4SS };
+  const instructions = [];
+  for (const { source, relative } of filesUnderRoot(files, anchor.rootSegments)) {
     const lowerRelative = relative.toLowerCase();
-    if (lowerRelative === UE4SS_DWMAPI.toLowerCase()) {
-      instructions.push({
-        type: "copy",
-        source: file,
-        destination: archiveJoin(BINARIES_PATH, UE4SS_DWMAPI)
-      });
+    if (isProxyDll(relative) && !lowerRelative.includes("/")) {
+      instructions.push({ type: "copy", source, destination: archiveJoin(BINARIES_PATH, archiveBaseName(relative)) });
       continue;
     }
     if (lowerRelative.startsWith("ue4ss/")) {
       const insideUe4ss = relative.slice("ue4ss/".length);
       const destination = archiveJoin(BINARIES_PATH, "ue4ss", insideUe4ss);
       if (insideUe4ss.toLowerCase() === UE4SS_SETTINGS.toLowerCase()) {
-        try {
-          const sourcePath = getStagingSourcePath(file, stagingPath, options?.sourcePathByFile);
-          const data = String(await readTextSettings(context, sourcePath));
-          instructions.push({
-            type: "generatefile",
-            data: data.replace(/bUseUObjectArrayCache\s*=\s*true/gim, "bUseUObjectArrayCache = false"),
-            destination
-          });
-        } catch {
-          instructions.push({ type: "copy", source: file, destination });
-        }
+        instructions.push(await rewriteSettings(context, source, stagingPath, options, destination));
         continue;
       }
       if (insideUe4ss.toLowerCase() === `mods/${MODS_FILE.toLowerCase()}`) {
         instructions.push({
           type: "copy",
-          source: file,
+          source,
           destination: archiveJoin(BINARIES_PATH, "ue4ss", "Mods", MODS_FILE_BACKUP)
         });
         continue;
       }
-      instructions.push({ type: "copy", source: file, destination });
+      instructions.push({ type: "copy", source, destination });
       continue;
     }
-    const isRootDll = DLL_EXTENSIONS.includes(archiveExtName(relative)) && segments.length === anchor.rootSegments.length + 1;
-    if (isRootDll) {
-      instructions.push({
-        type: "copy",
-        source: file,
-        destination: archiveJoin(BINARIES_PATH, archiveBaseName(relative))
-      });
+    if (isSettingsFile(relative) && !lowerRelative.includes("/")) {
+      instructions.push(await rewriteSettings(context, source, stagingPath, options, archiveJoin(BINARIES_PATH, UE4SS_SETTINGS)));
+      continue;
+    }
+    if (DLL_EXTENSIONS.includes(archiveExtName(relative)) && !lowerRelative.includes("/")) {
+      instructions.push({ type: "copy", source, destination: archiveJoin(BINARIES_PATH, archiveBaseName(relative)) });
+      continue;
+    }
+    if (!relative.endsWith("/")) {
+      instructions.push({ type: "copy", source, destination: archiveJoin(BINARIES_PATH, relative) });
     }
   }
   return { instructions, modType: MOD_TYPE_UE4SS };
@@ -462,7 +656,9 @@ async function installUe4ss(context, files, stagingPath, options) {
 function installCombo(context, files, stagingPath) {
   const instructions = [];
   const pakGroups = groupPaks(files);
+  for (const instruction of installLogic(files).instructions) pushUnique(instructions, instruction);
   for (const group of pakGroups) {
+    if (group.logicRoot) continue;
     for (const instruction of pakInstructions(group)) pushUnique(instructions, instruction);
   }
   const modInstall = installUe4ssMod(files, stagingPath, MOD_TYPE_COMBO);
@@ -483,7 +679,7 @@ function installLogic(files) {
   const instructions = [];
   for (const file of files) {
     const filePath = safeArchivePath(file);
-    if (!filePath || !isArchiveFile(file, files) || !isPakLike(filePath)) continue;
+    if (!filePath || !isArchiveFile(file, files)) continue;
     const idx = findSegment(filePath, "LogicMods");
     if (idx < 0) continue;
     const relative = splitArchivePath(filePath).slice(idx + 1).join("/");
@@ -512,6 +708,7 @@ function installUe4ssMod(files, stagingPath, modType) {
     { type: "attribute", key: "phantomBladeZeroUe4ssFolderId", value: folderId }
   ];
   let hasEnabledFile = false;
+  const gameAnchorIndex = findRootAnchor(root.join("/"))?.anchorIndex ?? null;
   for (const file of files) {
     const filePath = safeArchivePath(file);
     if (!filePath || !isArchiveFile(file, files)) continue;
@@ -519,20 +716,31 @@ function installUe4ssMod(files, stagingPath, modType) {
     const segments = splitArchivePath(filePath);
     const inRoot = root.slice(0, prefixLength).every((segment, index) => segments[index]?.toLowerCase() === segment.toLowerCase());
     if (!inRoot) continue;
-    const relative = segments.slice(prefixLength).join("/");
-    if (!relative) continue;
-    if (archiveBaseName(relative).toLowerCase() === ENABLED_FILE.toLowerCase()) hasEnabledFile = true;
-    pushUnique(instructions, {
-      type: "copy",
-      source: file,
-      destination: archiveJoin(UE4SS_MODS_PATH, folderId, relative)
-    });
+    let destination = null;
+    const ue4ssModsIndex = segments.findIndex((segment, index) => segment.toLowerCase() === "ue4ss" && segments[index + 1]?.toLowerCase() === "mods");
+    if (ue4ssModsIndex >= 0 && segments.length > ue4ssModsIndex + 2) {
+      const relativePath = segments.slice(ue4ssModsIndex + 2).join("/");
+      if (relativePath) destination = archiveJoin(UE4SS_MODS_PATH, relativePath);
+    }
+    if (!destination && gameAnchorIndex !== null) {
+      destination = segments.slice(gameAnchorIndex).join("/");
+    }
+    if (!destination) {
+      const relativePath = segments.slice(prefixLength).join("/");
+      if (!relativePath) continue;
+      destination = archiveJoin(UE4SS_MODS_PATH, folderId, relativePath);
+    }
+    if (archiveBaseName(filePath).toLowerCase() === ENABLED_FILE.toLowerCase()) hasEnabledFile = true;
+    pushUnique(instructions, { type: "copy", source: file, destination });
   }
   if (!hasEnabledFile && instructions.some((instruction) => instruction.type === "copy")) {
+    const firstCopy = instructions.find((instruction) => instruction.type === "copy");
+    const destination = String(firstCopy?.destination ?? "");
+    const enabledFolder = destination.toLowerCase().startsWith(UE4SS_MODS_PATH.toLowerCase()) ? destination.split("/").slice(0, UE4SS_MODS_PATH.split("/").length + 1).join("/") : archiveJoin(UE4SS_MODS_PATH, folderId);
     instructions.push({
       type: "generatefile",
       data: "",
-      destination: archiveJoin(UE4SS_MODS_PATH, folderId, ENABLED_FILE)
+      destination: archiveJoin(enabledFolder, ENABLED_FILE)
     });
   }
   return { instructions, modType };
@@ -542,6 +750,65 @@ function installScript(files, stagingPath) {
 }
 function installDll(files, stagingPath) {
   return installUe4ssMod(files, stagingPath, MOD_TYPE_DLL);
+}
+function installUe4ssFolder(files, stagingPath) {
+  const anchor = findMarkerDir(files, (filePath) => archiveBaseName(filePath).toLowerCase() === ENABLED_FILE.toLowerCase());
+  if (!anchor) return { instructions: [], modType: MOD_TYPE_UE4SS_FOLDER };
+  const folderId = anchor[anchor.length - 1] || fallbackFolderId(stagingPath);
+  const instructions = [
+    { type: "attribute", key: "phantomBladeZeroUe4ssFolderId", value: folderId },
+    ...deploySubtree(files, anchor, archiveJoin(UE4SS_MODS_PATH, folderId))
+  ];
+  return { instructions, modType: MOD_TYPE_UE4SS_FOLDER };
+}
+function installLua(files, stagingPath) {
+  const anchor = findMarkerDir(files, (filePath) => archiveExtName(filePath) === ".lua");
+  if (!anchor) return { instructions: [], modType: MOD_TYPE_UE4SS_FOLDER };
+  const folderId = anchor.length > 0 ? anchor[anchor.length - 1] : fallbackFolderId(stagingPath);
+  const rootSegments = anchor.length > 0 ? anchor : [];
+  const instructions = [
+    { type: "attribute", key: "phantomBladeZeroUe4ssFolderId", value: folderId },
+    ...deploySubtree(files, rootSegments, archiveJoin(UE4SS_MODS_PATH, folderId)),
+    {
+      type: "generatefile",
+      data: "",
+      destination: archiveJoin(UE4SS_MODS_PATH, folderId, ENABLED_FILE)
+    }
+  ];
+  return { instructions, modType: MOD_TYPE_UE4SS_FOLDER };
+}
+function installContent(files) {
+  const paths = collectEntries(files).map((entry) => entry.file);
+  const anchor = findContentAnchor(paths);
+  if (anchor === null) return { instructions: [], modType: MOD_TYPE_CONTENT };
+  const instructions = [];
+  for (const { source, file } of collectEntries(files)) {
+    const segments = splitArchivePath(file);
+    const relativePath = segments.slice(anchor).join("/");
+    if (!relativePath) continue;
+    pushUnique(instructions, {
+      type: "copy",
+      source,
+      destination: archiveJoin(GAME_FOLDER, relativePath)
+    });
+  }
+  return { instructions, modType: MOD_TYPE_CONTENT };
+}
+function installPakAlt(files) {
+  const anchor = findPaksAnchor(files);
+  if (anchor === null) return { instructions: [], modType: MOD_TYPE_PAK_ALT };
+  const instructions = [];
+  for (const { source, file } of collectEntries(files)) {
+    const segments = splitArchivePath(file);
+    if (segments.length <= anchor) continue;
+    const relativePath = segments.slice(anchor).join("/");
+    pushUnique(instructions, {
+      type: "copy",
+      source,
+      destination: archiveJoin(GAME_FOLDER, "Content", relativePath)
+    });
+  }
+  return { instructions, modType: MOD_TYPE_PAK_ALT };
 }
 function installPak(context, files) {
   const groups = groupPaks(files);
@@ -558,16 +825,44 @@ function installPak(context, files) {
   }
   return { instructions, modType: MOD_TYPE_PAK };
 }
-function installRoot(files) {
-  const instructions = [];
-  if (findUe4ssAnchor(files) !== null) return { instructions, modType: MOD_TYPE_ROOT };
+function installIntoBinaries(files, anchor, modType) {
+  if (!anchor) return { instructions: [], modType };
+  return {
+    instructions: deploySubtree(files, anchor, BINARIES_PATH),
+    modType
+  };
+}
+function installReshade(files) {
+  return installIntoBinaries(files, findMarkerDir(files, isReShadeIni), MOD_TYPE_BINARIES);
+}
+function installPreset(files) {
+  return installIntoBinaries(files, findMarkerDir(files, isLoosePresetIni), MOD_TYPE_BINARIES);
+}
+function installBinaryDll(files) {
+  const anchors = [];
+  const seen = /* @__PURE__ */ new Set();
   for (const file of files) {
     const filePath = safeArchivePath(file);
-    if (!filePath || !isArchiveFile(file, files) || isDedicatedModLayout(filePath)) continue;
-    const anchor = findRootAnchor(filePath);
+    if (!filePath || !isArchiveFile(file, files) || archiveExtName(filePath) !== ".dll") continue;
+    const dir = splitArchivePath(filePath).slice(0, -1);
+    const key = dir.map((part) => part.toLowerCase()).join("/");
+    if (seen.has(key)) continue;
+    seen.add(key);
+    anchors.push(dir);
+  }
+  const instructions = [];
+  for (const anchor of anchors) {
+    for (const instruction of deploySubtree(files, anchor, BINARIES_PATH)) pushUnique(instructions, instruction);
+  }
+  return { instructions, modType: MOD_TYPE_BINARIES };
+}
+function installRoot(files) {
+  const instructions = [];
+  for (const { source, file } of collectEntries(files)) {
+    const anchor = findRootAnchor(file);
     if (!anchor) continue;
-    const destination = splitArchivePath(filePath).slice(anchor.anchorIndex).join("/");
-    pushUnique(instructions, { type: "copy", source: file, destination });
+    const destination = splitArchivePath(file).slice(anchor.anchorIndex).join("/");
+    pushUnique(instructions, { type: "copy", source, destination });
   }
   return { instructions, modType: MOD_TYPE_ROOT };
 }
@@ -659,12 +954,48 @@ function registerPhantomBladeZeroModTypes(context) {
   );
   register(
     context,
+    MOD_TYPE_UE4SS_FOLDER,
+    MOD_TYPE_PRIORITY.ue4ssFolder,
+    "UE4SS Mod Folder (enabled.txt / bare Lua)",
+    INSTALLER_PRIORITY.ue4ssFolder,
+    testUe4ssFolderOrLua,
+    (files, stagingPath) => installUe4ssFolderOrLua(files, stagingPath)
+  );
+  register(
+    context,
+    MOD_TYPE_CONTENT,
+    MOD_TYPE_PRIORITY.content,
+    "Project Content Folder",
+    INSTALLER_PRIORITY.content,
+    testContent,
+    installContent
+  );
+  register(
+    context,
+    MOD_TYPE_PAK_ALT,
+    MOD_TYPE_PRIORITY.pakAlt,
+    "UE5 Pak Mod (Paks folder)",
+    INSTALLER_PRIORITY.pakAlt,
+    testPakAlt,
+    installPakAlt
+  );
+  register(
+    context,
     MOD_TYPE_PAK,
     MOD_TYPE_PRIORITY.pak,
     "UE5 Pak Mod",
     INSTALLER_PRIORITY.pak,
     testPak,
     (files) => installPak(context, files)
+  );
+  register(
+    context,
+    MOD_TYPE_BINARIES,
+    MOD_TYPE_PRIORITY.binaries,
+    "Binaries (ReShade / DLL plugins)",
+    INSTALLER_PRIORITY.binaries,
+    testBinaries,
+    installBinaries
   );
   register(
     context,
@@ -713,18 +1044,36 @@ function getLocalModFeatures() {
   ];
 }
 function getUe4ssPaths(context, gamePath) {
-  const path2 = context.api.util.path;
+  const join = context.api.util.path.join;
+  const binaries = gamePath ? join(gamePath, ...BINARIES_PATH.split("/")) : "";
   return {
-    dwmapi: gamePath ? path2.join(gamePath, BINARIES_PATH, UE4SS_DWMAPI) : "",
-    dll: gamePath ? path2.join(gamePath, BINARIES_PATH, "ue4ss", UE4SS_DLL) : ""
+    binaries,
+    proxies: gamePath ? UE4SS_PROXY_DLLS.map((proxy) => join(binaries, proxy)) : [],
+    runtime: gamePath ? [join(binaries, "ue4ss", UE4SS_DLL), join(binaries, UE4SS_DLL)] : []
   };
+}
+function getSetupDirectories(context, gamePath) {
+  if (!gamePath) return [];
+  const join = context.api.util.path.join;
+  return [PAK_MODS_PATH, LOGIC_MODS_PATH, UE4SS_MODS_PATH].map(
+    (relative) => join(gamePath, ...relative.split("/"))
+  );
+}
+async function ensureSetupDirectories(context, gamePath) {
+  const fs = require("fs");
+  for (const directory of getSetupDirectories(context, String(gamePath || ""))) {
+    try {
+      await fs.promises.mkdir(directory, { recursive: true });
+    } catch {
+    }
+  }
 }
 async function getRequirementStatus(context, gamePath) {
   const resolvedGamePath = String(gamePath || await findGamePath(context) || "");
   const paths = getUe4ssPaths(context, resolvedGamePath);
-  const hasDwmapi = Boolean(resolvedGamePath) && await fileExists(context, paths.dwmapi);
-  const hasUe4ssDll = Boolean(resolvedGamePath) && await fileExists(context, paths.dll);
-  const requirements = hasDwmapi && hasUe4ssDll ? [] : getRequirementItems();
+  const hasProxy = (await Promise.all(paths.proxies.map((file) => fileExists(context, file)))).some(Boolean);
+  const hasRuntime = (await Promise.all(paths.runtime.map((file) => fileExists(context, file)))).some(Boolean);
+  const requirements = hasProxy && hasRuntime ? [] : getRequirementItems();
   return {
     installed: requirements.length === 0,
     gamePath: resolvedGamePath,
@@ -743,6 +1092,11 @@ async function getExtensionRequiredMods(context, gamePath) {
     }
   };
 }
+async function setupExtension(context, gamePath) {
+  const resolved = String(gamePath || await findGamePath(context) || "");
+  await ensureSetupDirectories(context, resolved);
+  return getExtensionRequiredMods(context, resolved);
+}
 
 // extensions/PhantomBladeZero/src/index.ts
 async function main(context) {
@@ -753,7 +1107,7 @@ async function main(context) {
     executable: EXECUTABLE,
     queryPath: () => findGamePath(context),
     requiredFiles: [EXECUTABLE, "ProjectPBZ/Content/Paks"],
-    setup: async (discovery) => getExtensionRequiredMods(context, String(discovery?.path || "")),
+    setup: async (discovery) => setupExtension(context, String(discovery?.path || "")),
     localModFeatures: getLocalModFeatures(),
     environment: {
       SteamAPPId: STEAM_APP_ID
@@ -762,28 +1116,47 @@ async function main(context) {
       steamAppId: GAME_ID,
       nexusGameDomainName: "phantombladezero",
       customOpenModsPath: PAK_MODS_PATH,
-      supportsSymlinks: true
+      // IoStore containers (.utoc/.ucas) are memory-mapped and read back 0 bytes
+      // through a symlink, which crashes the UE5 Zen loader at startup.
+      supportsSymlinks: false,
+      // Per-install/per-mod bookkeeping files that must never raise a conflict
+      // prompt when several UE4SS mods are enabled together.
+      ignoreConflicts: ["UE4SS-settings.ini", "mods.txt.original", "enabled.txt"]
     }
   });
   registerPhantomBladeZeroModTypes(context);
-  context.registerExtensionAction(GAME_ID, "getExtensionRequiredMods", () => getExtensionRequiredMods(context));
+  context.registerExtensionAction(GAME_ID, "getExtensionRequiredMods", () => setupExtension(context));
   return true;
 }
 var src_default = main;
 // Annotate the CommonJS export names for ESM import in node:
 0 && (module.exports = {
+  installBinaries,
   installCombo,
+  installContent,
   installDll,
   installLogic,
+  installLua,
   installPak,
+  installPakAlt,
+  installPreset,
+  installReshade,
   installRoot,
   installScript,
   installUe4ss,
+  installUe4ssFolder,
+  testBinaries,
   testCombo,
+  testContent,
   testDll,
   testLogic,
+  testLua,
   testPak,
+  testPakAlt,
+  testPreset,
+  testReshade,
   testRoot,
   testScript,
-  testUe4ss
+  testUe4ss,
+  testUe4ssFolder
 });

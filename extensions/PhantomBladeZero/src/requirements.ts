@@ -2,11 +2,16 @@ import type { IExtensionContext, LocalModFeature } from 'heybox-mod-api'
 import {
   BINARIES_PATH,
   GAME_ID,
+  LOGIC_MODS_PATH,
   MOD_TYPE_UE4SS,
+  PAK_MODS_PATH,
   UE4SS_DLL,
-  UE4SS_DWMAPI,
+  UE4SS_MODS_PATH,
+  UE4SS_PROXY_DLLS,
   UE4SS_REQUIREMENT_MOD_ID,
 } from './constants'
+
+declare const require: any
 
 export interface RequirementStatus {
   installed: boolean
@@ -57,12 +62,47 @@ export function getLocalModFeatures(): LocalModFeature[] {
   ]
 }
 
-/** Both halves of the proxy install must be present before UE4SS mods can load. */
+/**
+ * Paths that must exist before UE4SS mods can load. Loaders are repacked with
+ * either the dwmapi proxy or an xinput proxy, so every known proxy name counts;
+ * the runtime may sit in `ue4ss/` or flat beside the game executable.
+ */
 export function getUe4ssPaths(context: IExtensionContext, gamePath: string) {
-  const path = context.api.util.path
+  const join = context.api.util.path.join
+  const binaries = gamePath ? join(gamePath, ...BINARIES_PATH.split('/')) : ''
   return {
-    dwmapi: gamePath ? path.join(gamePath, BINARIES_PATH, UE4SS_DWMAPI) : '',
-    dll: gamePath ? path.join(gamePath, BINARIES_PATH, 'ue4ss', UE4SS_DLL) : '',
+    binaries,
+    proxies: gamePath
+      ? UE4SS_PROXY_DLLS.map((proxy) => join(binaries, proxy))
+      : [],
+    runtime: gamePath
+      ? [join(binaries, 'ue4ss', UE4SS_DLL), join(binaries, UE4SS_DLL)]
+      : [],
+  }
+}
+
+/** Folders a deploy needs before the first mod is enabled. */
+export function getSetupDirectories(context: IExtensionContext, gamePath: string): string[] {
+  if (!gamePath) return []
+  const join = context.api.util.path.join
+  return [PAK_MODS_PATH, LOGIC_MODS_PATH, UE4SS_MODS_PATH].map(
+    (relative) => join(gamePath, ...relative.split('/')),
+  )
+}
+
+/**
+ * Vortex creates these folders on discovery because UE itself only writes them
+ * on first launch. Without them a pak or Lua mod deployed before the first run
+ * fails with "deployment target unknown".
+ */
+export async function ensureSetupDirectories(context: IExtensionContext, gamePath?: string): Promise<void> {
+  const fs = require('fs')
+  for (const directory of getSetupDirectories(context, String(gamePath || ''))) {
+    try {
+      await fs.promises.mkdir(directory, { recursive: true })
+    } catch {
+      // A read-only install still gets a clear deploy error later; do not fail setup.
+    }
   }
 }
 
@@ -72,9 +112,9 @@ export async function getRequirementStatus(
 ): Promise<RequirementStatus> {
   const resolvedGamePath = String(gamePath || await findGamePath(context) || '')
   const paths = getUe4ssPaths(context, resolvedGamePath)
-  const hasDwmapi = Boolean(resolvedGamePath) && await fileExists(context, paths.dwmapi)
-  const hasUe4ssDll = Boolean(resolvedGamePath) && await fileExists(context, paths.dll)
-  const requirements = hasDwmapi && hasUe4ssDll ? [] : getRequirementItems()
+  const hasProxy = (await Promise.all(paths.proxies.map((file) => fileExists(context, file)))).some(Boolean)
+  const hasRuntime = (await Promise.all(paths.runtime.map((file) => fileExists(context, file)))).some(Boolean)
+  const requirements = hasProxy && hasRuntime ? [] : getRequirementItems()
 
   return {
     installed: requirements.length === 0,
@@ -94,4 +134,10 @@ export async function getExtensionRequiredMods(context: IExtensionContext, gameP
       requirements: status.requirements,
     },
   }
+}
+
+export async function setupExtension(context: IExtensionContext, gamePath?: string) {
+  const resolved = String(gamePath || await findGamePath(context) || '')
+  await ensureSetupDirectories(context, resolved)
+  return getExtensionRequiredMods(context, resolved)
 }

@@ -2,30 +2,42 @@ import type { IExtensionContext } from 'heybox-mod-api'
 import {
   GAME_ID,
   INSTALLER_PRIORITY,
+  MOD_TYPE_BINARIES,
   MOD_TYPE_COMBO,
+  MOD_TYPE_CONTENT,
   MOD_TYPE_DLL,
   MOD_TYPE_LOGIC,
   MOD_TYPE_PAK,
+  MOD_TYPE_PAK_ALT,
   MOD_TYPE_PRIORITY,
   MOD_TYPE_ROOT,
   MOD_TYPE_SCRIPT,
   MOD_TYPE_UE4SS,
+  MOD_TYPE_UE4SS_FOLDER,
 } from './constants'
 import {
+  installBinaries,
   installCombo,
+  installContent,
   installDll,
   installLogic,
   installPak,
+  installPakAlt,
   installRoot,
   installScript,
   installUe4ss,
+  installUe4ssFolderOrLua,
+  testBinaries,
   testCombo,
+  testContent,
   testDll,
   testLogic,
   testPak,
+  testPakAlt,
   testRoot,
   testScript,
   testUe4ss,
+  testUe4ssFolderOrLua,
 } from './installers'
 import { applyMutableFilePolicies } from './policy'
 
@@ -113,12 +125,48 @@ export function registerPhantomBladeZeroModTypes(context: IExtensionContext): vo
   )
   register(
     context,
+    MOD_TYPE_UE4SS_FOLDER,
+    MOD_TYPE_PRIORITY.ue4ssFolder,
+    'UE4SS Mod Folder (enabled.txt / bare Lua)',
+    INSTALLER_PRIORITY.ue4ssFolder,
+    testUe4ssFolderOrLua,
+    (files: string[], stagingPath: string) => installUe4ssFolderOrLua(files, stagingPath),
+  )
+  register(
+    context,
+    MOD_TYPE_CONTENT,
+    MOD_TYPE_PRIORITY.content,
+    'Project Content Folder',
+    INSTALLER_PRIORITY.content,
+    testContent,
+    installContent,
+  )
+  register(
+    context,
+    MOD_TYPE_PAK_ALT,
+    MOD_TYPE_PRIORITY.pakAlt,
+    'UE5 Pak Mod (Paks folder)',
+    INSTALLER_PRIORITY.pakAlt,
+    testPakAlt,
+    installPakAlt,
+  )
+  register(
+    context,
     MOD_TYPE_PAK,
     MOD_TYPE_PRIORITY.pak,
     'UE5 Pak Mod',
     INSTALLER_PRIORITY.pak,
     testPak,
     (files: string[]) => installPak(context, files),
+  )
+  register(
+    context,
+    MOD_TYPE_BINARIES,
+    MOD_TYPE_PRIORITY.binaries,
+    'Binaries (ReShade / DLL plugins)',
+    INSTALLER_PRIORITY.binaries,
+    testBinaries,
+    installBinaries,
   )
   register(
     context,

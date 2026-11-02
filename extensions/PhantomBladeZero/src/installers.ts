@@ -1,25 +1,33 @@
 import type { IExtensionContext } from 'heybox-mod-api'
 import {
   BINARIES_PATH,
+  CONTENT_ROOT_DIRECTORIES,
   DLL_EXTENSIONS,
   ENABLED_FILE,
+  GAME_FOLDER,
   GAME_ID,
   LOGIC_MODS_PATH,
   LUA_EXTENSIONS,
   MODS_FILE,
   MODS_FILE_BACKUP,
+  MOD_TYPE_BINARIES,
   MOD_TYPE_COMBO,
+  MOD_TYPE_CONTENT,
   MOD_TYPE_DLL,
   MOD_TYPE_LOGIC,
   MOD_TYPE_PAK,
+  MOD_TYPE_PAK_ALT,
   MOD_TYPE_ROOT,
   MOD_TYPE_SCRIPT,
   MOD_TYPE_UE4SS,
+  MOD_TYPE_UE4SS_FOLDER,
   PAK_MODS_PATH,
   ROOT_DIRECTORIES,
+  UE_CONFIG_INI_NAMES,
   UE4SS_DLL,
   UE4SS_DWMAPI,
   UE4SS_MODS_PATH,
+  UE4SS_PROXY_DLLS,
   UE4SS_SETTINGS,
 } from './constants'
 import {
@@ -40,6 +48,7 @@ type Instruction = Record<string, unknown>
 
 const PATCH_EXTENSIONS = ['.pak', '.ucas', '.utoc', '.sig']
 const FOMOD_CONFIG = /(^|\/)fomod\/moduleconfig\.xml$/i
+const CONTENT_MARKERS = new Set(CONTENT_ROOT_DIRECTORIES.map((directory) => directory.toLowerCase()))
 
 function isPbz(gameId: number | string): boolean {
   return Number(gameId) === GAME_ID
@@ -82,11 +91,6 @@ function hasInstallablePak(files: string[]): boolean {
     if (extensions.has('.pak') || (extensions.has('.utoc') && extensions.has('.ucas'))) return true
   }
   return false
-}
-
-/** Explicit load-order list of a UE4SS install must never be treated as a mod payload. */
-function isUe4ssRuntime(files: string[]): boolean {
-  return hasBaseName(files, UE4SS_DWMAPI) && hasBaseName(files, UE4SS_DLL)
 }
 
 function pushUnique(instructions: Instruction[], instruction: Instruction): void {
@@ -201,22 +205,62 @@ function pakInstructions(group: PakGroup): Instruction[] {
   return instructions
 }
 
-function findUe4ssAnchor(files: string[]): { rootSegments: string[], dwmapiFile: string } | null {
+/** Proxy DLLs (dwmapi / xinput) that load UE4SS into the game process. */
+function isProxyDll(filePath: string): boolean {
+  const base = archiveBaseName(filePath).toLowerCase()
+  return UE4SS_PROXY_DLLS.some((proxy) => proxy.toLowerCase() === base)
+}
+
+function isSettingsFile(filePath: string): boolean {
+  return archiveBaseName(filePath).toLowerCase() === UE4SS_SETTINGS.toLowerCase()
+}
+
+interface LoaderAnchor {
+  rootSegments: string[]
+  proxyFiles: string[]
+}
+
+/**
+ * Locates the loader install root. A valid loader has a proxy DLL (dwmapi /
+ * xinput1_3 / xinput1_4) or a UE4SS-settings.ini next to either an `ue4ss/`
+ * runtime folder or a flat `UE4SS.dll`.
+ */
+function findLoaderAnchor(files: string[]): LoaderAnchor | null {
   for (const file of files) {
     const filePath = safeArchivePath(file)
-    if (!filePath || archiveBaseName(filePath).toLowerCase() !== UE4SS_DWMAPI) continue
+    if (!filePath) continue
+    if (!isProxyDll(filePath) && !isSettingsFile(filePath)) continue
     const rootSegments = splitArchivePath(filePath).slice(0, -1)
-    const dllSegments = [...rootSegments, 'ue4ss', UE4SS_DLL]
-    const hasRuntime = files.some((candidate) => {
+    const proxies: string[] = []
+    let hasRuntime = false
+    for (const candidate of files) {
       const candidatePath = safeArchivePath(candidate)
-      if (!candidatePath) return false
+      if (!candidatePath) continue
       const segments = splitArchivePath(candidatePath)
-      return segments.length === dllSegments.length
-        && dllSegments.every((segment, index) => segments[index].toLowerCase() === segment.toLowerCase())
-    })
-    if (hasRuntime) return { rootSegments, dwmapiFile: file }
+      const inRoot = rootSegments.every(
+        (segment, index) => segments[index]?.toLowerCase() === segment.toLowerCase(),
+      )
+      if (!inRoot) continue
+      const relative = segments.slice(rootSegments.length)
+      if (isProxyDll(candidatePath) && relative.length === 1) proxies.push(candidate)
+      if (relative.length === 1 && archiveBaseName(candidatePath).toLowerCase() === UE4SS_DLL.toLowerCase()) {
+        hasRuntime = true
+      }
+      if (
+        relative.length === 2
+        && relative[0].toLowerCase() === 'ue4ss'
+        && archiveBaseName(candidatePath).toLowerCase() === UE4SS_DLL.toLowerCase()
+      ) {
+        hasRuntime = true
+      }
+    }
+    if (hasRuntime) return { rootSegments, proxyFiles: proxies }
   }
   return null
+}
+
+function isLoaderLayout(files: string[]): boolean {
+  return findLoaderAnchor(files) !== null
 }
 
 function findLogicAnchor(files: string[]): string[] | null {
@@ -303,21 +347,6 @@ function collectUe4ssModRoots(files: string[]): string[][] {
 }
 
 /**
- * A root mod replaces files in place. Layouts owned by a dedicated modifier are
- * excluded so the same file is never deployed through two routes.
- */
-function isDedicatedModLayout(filePath: string): boolean {
-  const segments = splitArchivePath(filePath)
-  const lower = segments.map((segment) => segment.toLowerCase())
-  // The UE4SS runtime is installed as a whole by its own mod type.
-  if (lower.includes('ue4ss')) return true
-  if (lower.includes('logicmods')) return true
-  // Game content paks belong to the pak installer; engine paks are left to root mods.
-  if (isPakLike(filePath) && lower.includes('projectpbz') && lower.includes('paks')) return true
-  return false
-}
-
-/**
  * Anchor on the shallowest recognized game directory. Archives are regularly
  * wrapped one or more levels deep (release folder, extracted game root), so the
  * anchor may sit at any index; everything above it is wrapper noise.
@@ -331,31 +360,142 @@ function findRootAnchor(file: string): { anchorIndex: number } | null {
   return null
 }
 
+/** True when at least one file is laid out from the game install root. */
+function isGameRelativeLayout(files: string[]): boolean {
+  return files.some((file) => {
+    const filePath = safeArchivePath(file)
+    return Boolean(filePath && isArchiveFile(file, files) && findRootAnchor(filePath) !== null)
+  })
+}
+
+/**
+ * The index of the first project-relative top segment (`Content` / `Config` /
+ * `Binaries`), optionally after one shared wrapper folder.
+ */
+function findContentAnchor(filePaths: string[]): number | null {
+  const parsed = filePaths.map(splitArchivePath).filter((segments) => segments.length > 0)
+  if (parsed.length === 0) return null
+  const at = (segments: string[], index: number) => (
+    segments.length > index + 1 && CONTENT_MARKERS.has(segments[index].toLowerCase())
+  )
+  // Project-relative tree at the archive root, with optional loose sibling files.
+  if (
+    parsed.some((segments) => at(segments, 0))
+    && parsed.every((segments) => segments.length === 1 || CONTENT_MARKERS.has(segments[0].toLowerCase()))
+  ) {
+    return 0
+  }
+  // The same tree wrapped in one mod-name folder.
+  const top = parsed[0][0].toLowerCase()
+  if (
+    parsed.every((segments) => segments[0].toLowerCase() === top)
+    && parsed.every((segments) => segments.length >= 2)
+    && parsed.some((segments) => at(segments, 1))
+  ) {
+    return 1
+  }
+  return null
+}
+
+/** Anchor on the `Paks` directory of a bundled project tree (not `~mods`). */
+function findPaksAnchor(files: string[]): number | null {
+  for (const file of files) {
+    const filePath = safeArchivePath(file)
+    if (!filePath || !isPakLike(filePath)) continue
+    const idx = findSegment(filePath, 'Paks')
+    if (idx < 0) continue
+    const segments = splitArchivePath(filePath)
+    if (segments.some((segment) => segment.toLowerCase() === '~mods')) continue
+    if (segments.some((segment) => segment.toLowerCase() === 'logicmods')) continue
+    return idx
+  }
+  return null
+}
+
+/** The directory holding the given marker file, or null. */
+function findMarkerDir(files: string[], predicate: (filePath: string) => boolean): string[] | null {
+  for (const file of files) {
+    const filePath = safeArchivePath(file)
+    if (!filePath || !isArchiveFile(file, files) || !predicate(filePath)) continue
+    return splitArchivePath(filePath).slice(0, -1)
+  }
+  return null
+}
+
+function isReShadeIni(filePath: string): boolean {
+  return archiveBaseName(filePath).toLowerCase() === 'reshade.ini'
+}
+
+function isUeConfigIni(filePath: string): boolean {
+  return UE_CONFIG_INI_NAMES.includes(archiveBaseName(filePath).toLowerCase())
+}
+
+function isLoosePresetIni(filePath: string): boolean {
+  return archiveExtName(filePath) === '.ini' && !isReShadeIni(filePath) && !isUeConfigIni(filePath)
+}
+
+/** Files under `rootSegments`, with paths relative to it. */
+function filesUnderRoot(files: string[], rootSegments: string[]): Array<{ source: string, relative: string }> {
+  const result: Array<{ source: string, relative: string }> = []
+  for (const file of files) {
+    const filePath = safeArchivePath(file)
+    if (!filePath || !isArchiveFile(file, files)) continue
+    const segments = splitArchivePath(filePath)
+    const inRoot = rootSegments.every(
+      (segment, index) => segments[index]?.toLowerCase() === segment.toLowerCase(),
+    )
+    if (!inRoot) continue
+    const relative = segments.slice(rootSegments.length).join('/')
+    if (!relative) continue
+    result.push({ source: file, relative })
+  }
+  return result
+}
+
+function deploySubtree(files: string[], rootSegments: string[], placeAt: string): Instruction[] {
+  return filesUnderRoot(files, rootSegments).map(({ source, relative }) => ({
+    type: 'copy',
+    source,
+    destination: archiveJoin(placeAt, relative),
+  }))
+}
+
 export function testUe4ss(files: string[], gameId: number | string) {
-  return testResult(isPbz(gameId) && !isFomodPackage(files) && findUe4ssAnchor(files) !== null)
+  return testResult(
+    isPbz(gameId)
+    && !isFomodPackage(files)
+    && !isGameRelativeLayout(files)
+    && isLoaderLayout(files),
+  )
 }
 
 export function testCombo(files: string[], gameId: number | string) {
   return testResult(
     isPbz(gameId)
     && !isFomodPackage(files)
-    && !isUe4ssRuntime(files)
-    // A pak plus a UE4SS payload needs both halves deployed; the combo installer
-    // routes LogicMods containers and ~mods containers to their own folders.
+    && !isLoaderLayout(files)
+    && !isGameRelativeLayout(files)
     && hasInstallablePak(files)
     && findUe4ssModRoot(files) !== null,
   )
 }
 
 export function testLogic(files: string[], gameId: number | string) {
-  return testResult(isPbz(gameId) && !isFomodPackage(files) && findLogicAnchor(files) !== null)
+  return testResult(
+    isPbz(gameId)
+    && !isFomodPackage(files)
+    && !isLoaderLayout(files)
+    && !isGameRelativeLayout(files)
+    && findLogicAnchor(files) !== null,
+  )
 }
 
 export function testScript(files: string[], gameId: number | string) {
   return testResult(
     isPbz(gameId)
     && !isFomodPackage(files)
-    && !isUe4ssRuntime(files)
+    && !isLoaderLayout(files)
+    && !isGameRelativeLayout(files)
     && findUe4ssModRoot(files, SCRIPT_MARKER) !== null,
   )
 }
@@ -364,36 +504,146 @@ export function testDll(files: string[], gameId: number | string) {
   return testResult(
     isPbz(gameId)
     && !isFomodPackage(files)
-    && !isUe4ssRuntime(files)
+    && !isLoaderLayout(files)
+    && !isGameRelativeLayout(files)
     && findUe4ssModRoot(files, DLL_MARKER) !== null,
   )
 }
 
+/** A UE4SS mod folder keyed only by `enabled.txt`. */
+export function testUe4ssFolder(files: string[], gameId: number | string) {
+  if (!isPbz(gameId) || isFomodPackage(files) || isLoaderLayout(files)) return testResult(false)
+  if (isGameRelativeLayout(files)) return testResult(false)
+  if (findUe4ssModRoot(files) !== null) return testResult(false)
+  if (hasInstallablePak(files)) return testResult(false)
+  const anchor = findMarkerDir(files, (filePath) => archiveBaseName(filePath).toLowerCase() === ENABLED_FILE.toLowerCase())
+  return testResult(anchor !== null && anchor.length > 0)
+}
+
+/** A bare `.lua` mod without a Scripts folder. */
+export function testLua(files: string[], gameId: number | string) {
+  if (!isPbz(gameId) || isFomodPackage(files) || isLoaderLayout(files)) return testResult(false)
+  if (isGameRelativeLayout(files)) return testResult(false)
+  if (findUe4ssModRoot(files) !== null || hasInstallablePak(files)) return testResult(false)
+  if (hasBaseName(files, ENABLED_FILE)) return testResult(false)
+  return testResult(findMarkerDir(files, (filePath) => archiveExtName(filePath) === '.lua') !== null)
+}
+
+export function testContent(files: string[], gameId: number | string) {
+  if (!isPbz(gameId) || isFomodPackage(files) || isLoaderLayout(files)) return testResult(false)
+  if (isGameRelativeLayout(files)) return testResult(false)
+  const paths = collectEntries(files).map((entry) => entry.file)
+  return testResult(findContentAnchor(paths) !== null)
+}
+
+export function testPakAlt(files: string[], gameId: number | string) {
+  if (!isPbz(gameId) || isFomodPackage(files) || isLoaderLayout(files)) return testResult(false)
+  if (isGameRelativeLayout(files)) return testResult(false)
+  if (!hasInstallablePak(files)) return testResult(false)
+  if (findLogicAnchor(files) !== null) return testResult(false)
+  return testResult(findPaksAnchor(files) !== null)
+}
+
 export function testPak(files: string[], gameId: number | string) {
-  const supported = isPbz(gameId)
-    && !isFomodPackage(files)
-    && hasInstallablePak(files)
-    && findLogicAnchor(files) === null
-    // Scripts/dlls next to a pak make it a hybrid mod; the combo installer owns that layout.
-    && findUe4ssModRoot(files) === null
-    && !findUe4ssAnchor(files)
-  return testResult(supported)
+  if (!isPbz(gameId) || isFomodPackage(files) || isLoaderLayout(files)) return testResult(false)
+  if (isGameRelativeLayout(files)) return testResult(false)
+  if (!hasInstallablePak(files)) return testResult(false)
+  if (findLogicAnchor(files) !== null) return testResult(false)
+  // A bundled project tree (`Paks/` folder) belongs to pak-alt, which keeps it intact.
+  if (findPaksAnchor(files) !== null) return testResult(false)
+  const paths = collectEntries(files).map((entry) => entry.file)
+  if (findContentAnchor(paths) !== null) return testResult(false)
+  // Scripts/dlls next to a pak make it a hybrid mod; the combo installer owns that layout.
+  if (findUe4ssModRoot(files) !== null) return testResult(false)
+  if (hasBaseName(files, ENABLED_FILE)) return testResult(false)
+  return testResult(true)
+}
+
+/** ReShade proper: an archive shipping ReShade.ini (and its shader tree). */
+export function testReshade(files: string[], gameId: number | string) {
+  if (!isPbz(gameId) || isFomodPackage(files) || isLoaderLayout(files)) return testResult(false)
+  if (isGameRelativeLayout(files)) return testResult(false)
+  if (hasInstallablePak(files)) return testResult(false)
+  return testResult(hasBaseName(files, 'ReShade.ini'))
+}
+
+/** A bare ReShade preset `.ini` without ReShade itself. */
+export function testPreset(files: string[], gameId: number | string) {
+  if (!isPbz(gameId) || isFomodPackage(files) || isLoaderLayout(files)) return testResult(false)
+  if (isGameRelativeLayout(files)) return testResult(false)
+  if (hasInstallablePak(files) || hasBaseName(files, ENABLED_FILE)) return testResult(false)
+  if (hasBaseName(files, 'ReShade.ini')) return testResult(false)
+  if (findUe4ssModRoot(files) !== null) return testResult(false)
+  return testResult(findMarkerDir(files, isLoosePresetIni) !== null)
+}
+
+/** A loose native DLL plugin (ASI/winmm proxies, engine plugins) for the game exe dir. */
+export function testBinaryDll(files: string[], gameId: number | string) {
+  if (!isPbz(gameId) || isFomodPackage(files) || isLoaderLayout(files)) return testResult(false)
+  if (isGameRelativeLayout(files)) return testResult(false)
+  if (hasInstallablePak(files) || hasBaseName(files, ENABLED_FILE)) return testResult(false)
+  if (findUe4ssModRoot(files) !== null) return testResult(false)
+  const hasReshade = hasBaseName(files, 'ReShade.ini')
+  if (hasReshade) return testResult(false)
+  const paths = collectEntries(files).map((entry) => entry.file)
+  if (findContentAnchor(paths) !== null) return testResult(false)
+  return testResult(findMarkerDir(files, (filePath) => archiveExtName(filePath) === '.dll') !== null)
 }
 
 export function testRoot(files: string[], gameId: number | string) {
   if (!isPbz(gameId) || isFomodPackage(files)) return testResult(false)
-  // A complete UE4SS proxy install is the UE4SS mod type, never a root pack.
-  if (findUe4ssAnchor(files) !== null) return testResult(false)
-  const anchored = files.some((file) => {
-    const filePath = safeArchivePath(file)
-    if (!filePath || !isArchiveFile(file, files) || isDedicatedModLayout(filePath)) return false
-    return findRootAnchor(filePath) !== null
-  })
-  return testResult(anchored)
+  return testResult(isGameRelativeLayout(files))
+}
+
+/** `ue4ss/Mods` folder keyed by enabled.txt or a bare Lua payload. */
+export function testUe4ssFolderOrLua(files: string[], gameId: number | string) {
+  const folder = testUe4ssFolder(files, gameId)
+  return folder.supported ? folder : testLua(files, gameId)
+}
+
+export function installUe4ssFolderOrLua(files: string[], stagingPath?: string) {
+  return testUe4ssFolder(files, GAME_ID).supported
+    ? installUe4ssFolder(files, stagingPath)
+    : installLua(files, stagingPath)
+}
+
+/** ReShade bundle, bare preset, or a loose native DLL plugin. */
+export function testBinaries(files: string[], gameId: number | string) {
+  const reshade = testReshade(files, gameId)
+  if (reshade.supported) return reshade
+  const preset = testPreset(files, gameId)
+  if (preset.supported) return preset
+  return testBinaryDll(files, gameId)
+}
+
+export function installBinaries(files: string[]) {
+  if (testReshade(files, GAME_ID).supported) return installReshade(files)
+  if (testPreset(files, GAME_ID).supported) return installPreset(files)
+  return installBinaryDll(files)
 }
 
 function readTextSettings(context: IExtensionContext, sourcePath: string, encoding = 'utf8') {
   return context.api.util.fs.readFile(sourcePath, { encoding } as any)
+}
+
+async function rewriteSettings(
+  context: IExtensionContext,
+  file: string,
+  stagingPath: string | undefined,
+  options: any,
+  destination: string,
+): Promise<Instruction> {
+  try {
+    const sourcePath = getStagingSourcePath(file, stagingPath, options?.sourcePathByFile)
+    const data = String(await readTextSettings(context, sourcePath))
+    return {
+      type: 'generatefile',
+      data: data.replace(/bUseUObjectArrayCache\s*=\s*true/gim, 'bUseUObjectArrayCache = false'),
+      destination,
+    }
+  } catch {
+    return { type: 'copy', source: file, destination }
+  }
 }
 
 export async function installUe4ss(
@@ -402,26 +652,15 @@ export async function installUe4ss(
   stagingPath?: string,
   options?: any,
 ) {
-  const anchor = findUe4ssAnchor(files)
+  const anchor = findLoaderAnchor(files)
   if (!anchor) return { instructions: [], modType: MOD_TYPE_UE4SS }
 
   const instructions: Instruction[] = []
-  for (const file of files) {
-    const filePath = safeArchivePath(file)
-    if (!filePath || !isArchiveFile(file, files)) continue
-    const segments = splitArchivePath(filePath)
-    const inRoot = anchor.rootSegments.every((segment, index) => segments[index]?.toLowerCase() === segment.toLowerCase())
-    if (!inRoot) continue
-
-    const relative = segments.slice(anchor.rootSegments.length).join('/')
+  for (const { source, relative } of filesUnderRoot(files, anchor.rootSegments)) {
     const lowerRelative = relative.toLowerCase()
 
-    if (lowerRelative === UE4SS_DWMAPI.toLowerCase()) {
-      instructions.push({
-        type: 'copy',
-        source: file,
-        destination: archiveJoin(BINARIES_PATH, UE4SS_DWMAPI),
-      })
+    if (isProxyDll(relative) && !lowerRelative.includes('/')) {
+      instructions.push({ type: 'copy', source, destination: archiveJoin(BINARIES_PATH, archiveBaseName(relative)) })
       continue
     }
 
@@ -430,17 +669,7 @@ export async function installUe4ss(
       const destination = archiveJoin(BINARIES_PATH, 'ue4ss', insideUe4ss)
 
       if (insideUe4ss.toLowerCase() === UE4SS_SETTINGS.toLowerCase()) {
-        try {
-          const sourcePath = getStagingSourcePath(file, stagingPath, options?.sourcePathByFile)
-          const data = String(await readTextSettings(context, sourcePath))
-          instructions.push({
-            type: 'generatefile',
-            data: data.replace(/bUseUObjectArrayCache\s*=\s*true/gim, 'bUseUObjectArrayCache = false'),
-            destination,
-          })
-        } catch {
-          instructions.push({ type: 'copy', source: file, destination })
-        }
+        instructions.push(await rewriteSettings(context, source, stagingPath, options, destination))
         continue
       }
 
@@ -450,23 +679,31 @@ export async function installUe4ss(
         // entries (CheatManager, console enablers) must never be clobbered.
         instructions.push({
           type: 'copy',
-          source: file,
+          source,
           destination: archiveJoin(BINARIES_PATH, 'ue4ss', 'Mods', MODS_FILE_BACKUP),
         })
         continue
       }
 
-      instructions.push({ type: 'copy', source: file, destination })
+      instructions.push({ type: 'copy', source, destination })
       continue
     }
 
-    const isRootDll = DLL_EXTENSIONS.includes(archiveExtName(relative)) && segments.length === anchor.rootSegments.length + 1
-    if (isRootDll) {
-      instructions.push({
-        type: 'copy',
-        source: file,
-        destination: archiveJoin(BINARIES_PATH, archiveBaseName(relative)),
-      })
+    // Flat loader layouts put UE4SS.dll and its settings beside the proxy DLL.
+    if (isSettingsFile(relative) && !lowerRelative.includes('/')) {
+      instructions.push(await rewriteSettings(context, source, stagingPath, options, archiveJoin(BINARIES_PATH, UE4SS_SETTINGS)))
+      continue
+    }
+
+    if (DLL_EXTENSIONS.includes(archiveExtName(relative)) && !lowerRelative.includes('/')) {
+      instructions.push({ type: 'copy', source, destination: archiveJoin(BINARIES_PATH, archiveBaseName(relative)) })
+      continue
+    }
+
+    // Anything else that ships with the loader (README, a stray pak) is deployed
+    // beside it rather than dropped, matching a whole-archive loader install.
+    if (!relative.endsWith('/')) {
+      instructions.push({ type: 'copy', source, destination: archiveJoin(BINARIES_PATH, relative) })
     }
   }
 
@@ -476,7 +713,11 @@ export async function installUe4ss(
 export function installCombo(context: IExtensionContext, files: string[], stagingPath?: string) {
   const instructions: Instruction[] = []
   const pakGroups = groupPaks(files)
+  // LogicMods containers (and their info sidecars) route through the LogicMod
+  // installer; every other pak group flattens into ~mods.
+  for (const instruction of installLogic(files).instructions) pushUnique(instructions, instruction)
   for (const group of pakGroups) {
+    if (group.logicRoot) continue
     for (const instruction of pakInstructions(group)) pushUnique(instructions, instruction)
   }
 
@@ -499,11 +740,12 @@ export function installCombo(context: IExtensionContext, files: string[], stagin
 
 export function installLogic(files: string[]) {
   // Resolve LogicMods per file so archives that nest containers under different
-  // wrappers still deploy all of them instead of only the first anchor.
+  // wrappers still deploy all of them instead of only the first anchor. Non-pak
+  // sidecars inside the folder (logicmod info files) ride along unchanged.
   const instructions: Instruction[] = []
   for (const file of files) {
     const filePath = safeArchivePath(file)
-    if (!filePath || !isArchiveFile(file, files) || !isPakLike(filePath)) continue
+    if (!filePath || !isArchiveFile(file, files)) continue
     const idx = findSegment(filePath, 'LogicMods')
     if (idx < 0) continue
     const relative = splitArchivePath(filePath).slice(idx + 1).join('/')
@@ -535,6 +777,11 @@ export function installUe4ssMod(files: string[], stagingPath: string | undefined
   ]
   let hasEnabledFile = false
 
+  // A game-relative Lua mod (`platform/steam/ue4ss/Mods/X/Scripts/...`) is
+  // re-anchored under `ue4ss/Mods/` so its folder name survives. Anything else
+  // that already starts inside the game folder keeps its game-relative path.
+  const gameAnchorIndex = findRootAnchor(root.join('/'))?.anchorIndex ?? null
+
   for (const file of files) {
     const filePath = safeArchivePath(file)
     if (!filePath || !isArchiveFile(file, files)) continue
@@ -543,21 +790,38 @@ export function installUe4ssMod(files: string[], stagingPath: string | undefined
     const segments = splitArchivePath(filePath)
     const inRoot = root.slice(0, prefixLength).every((segment, index) => segments[index]?.toLowerCase() === segment.toLowerCase())
     if (!inRoot) continue
-    const relative = segments.slice(prefixLength).join('/')
-    if (!relative) continue
-    if (archiveBaseName(relative).toLowerCase() === ENABLED_FILE.toLowerCase()) hasEnabledFile = true
-    pushUnique(instructions, {
-      type: 'copy',
-      source: file,
-      destination: archiveJoin(UE4SS_MODS_PATH, folderId, relative),
-    })
+
+    let destination: string | null = null
+    const ue4ssModsIndex = segments.findIndex((segment, index) => (
+      segment.toLowerCase() === 'ue4ss' && segments[index + 1]?.toLowerCase() === 'mods'
+    ))
+    if (ue4ssModsIndex >= 0 && segments.length > ue4ssModsIndex + 2) {
+      const relativePath = segments.slice(ue4ssModsIndex + 2).join('/')
+      if (relativePath) destination = archiveJoin(UE4SS_MODS_PATH, relativePath)
+    }
+    if (!destination && gameAnchorIndex !== null) {
+      destination = segments.slice(gameAnchorIndex).join('/')
+    }
+    if (!destination) {
+      const relativePath = segments.slice(prefixLength).join('/')
+      if (!relativePath) continue
+      destination = archiveJoin(UE4SS_MODS_PATH, folderId, relativePath)
+    }
+
+    if (archiveBaseName(filePath).toLowerCase() === ENABLED_FILE.toLowerCase()) hasEnabledFile = true
+    pushUnique(instructions, { type: 'copy', source: file, destination })
   }
 
   if (!hasEnabledFile && instructions.some((instruction) => instruction.type === 'copy')) {
+    const firstCopy = instructions.find((instruction) => instruction.type === 'copy')
+    const destination = String(firstCopy?.destination ?? '')
+    const enabledFolder = destination.toLowerCase().startsWith(UE4SS_MODS_PATH.toLowerCase())
+      ? destination.split('/').slice(0, UE4SS_MODS_PATH.split('/').length + 1).join('/')
+      : archiveJoin(UE4SS_MODS_PATH, folderId)
     instructions.push({
       type: 'generatefile',
       data: '',
-      destination: archiveJoin(UE4SS_MODS_PATH, folderId, ENABLED_FILE),
+      destination: archiveJoin(enabledFolder, ENABLED_FILE),
     })
   }
 
@@ -570,6 +834,72 @@ export function installScript(files: string[], stagingPath?: string) {
 
 export function installDll(files: string[], stagingPath?: string) {
   return installUe4ssMod(files, stagingPath, MOD_TYPE_DLL)
+}
+
+/** Installs an `enabled.txt`-keyed mod folder under `ue4ss/Mods/`. */
+export function installUe4ssFolder(files: string[], stagingPath?: string) {
+  const anchor = findMarkerDir(files, (filePath) => archiveBaseName(filePath).toLowerCase() === ENABLED_FILE.toLowerCase())
+  if (!anchor) return { instructions: [], modType: MOD_TYPE_UE4SS_FOLDER }
+  const folderId = anchor[anchor.length - 1] || fallbackFolderId(stagingPath)
+  const instructions: Instruction[] = [
+    { type: 'attribute', key: 'phantomBladeZeroUe4ssFolderId', value: folderId },
+    ...deploySubtree(files, anchor, archiveJoin(UE4SS_MODS_PATH, folderId)),
+  ]
+  return { instructions, modType: MOD_TYPE_UE4SS_FOLDER }
+}
+
+/** Installs a bare `.lua` payload as a UE4SS mod folder. */
+export function installLua(files: string[], stagingPath?: string) {
+  const anchor = findMarkerDir(files, (filePath) => archiveExtName(filePath) === '.lua')
+  if (!anchor) return { instructions: [], modType: MOD_TYPE_UE4SS_FOLDER }
+  const folderId = anchor.length > 0 ? anchor[anchor.length - 1] : fallbackFolderId(stagingPath)
+  const rootSegments = anchor.length > 0 ? anchor : []
+  const instructions: Instruction[] = [
+    { type: 'attribute', key: 'phantomBladeZeroUe4ssFolderId', value: folderId },
+    ...deploySubtree(files, rootSegments, archiveJoin(UE4SS_MODS_PATH, folderId)),
+    {
+      type: 'generatefile',
+      data: '',
+      destination: archiveJoin(UE4SS_MODS_PATH, folderId, ENABLED_FILE),
+    },
+  ]
+  return { instructions, modType: MOD_TYPE_UE4SS_FOLDER }
+}
+
+export function installContent(files: string[]) {
+  const paths = collectEntries(files).map((entry) => entry.file)
+  const anchor = findContentAnchor(paths)
+  if (anchor === null) return { instructions: [], modType: MOD_TYPE_CONTENT }
+  const instructions: Instruction[] = []
+  for (const { source, file } of collectEntries(files)) {
+    const segments = splitArchivePath(file)
+    const relativePath = segments.slice(anchor).join('/')
+    if (!relativePath) continue
+    pushUnique(instructions, {
+      type: 'copy',
+      source,
+      destination: archiveJoin(GAME_FOLDER, relativePath),
+    })
+  }
+  return { instructions, modType: MOD_TYPE_CONTENT }
+}
+
+/** Keeps a bundled `Paks/` tree under `ProjectPBZ/Content`. */
+export function installPakAlt(files: string[]) {
+  const anchor = findPaksAnchor(files)
+  if (anchor === null) return { instructions: [], modType: MOD_TYPE_PAK_ALT }
+  const instructions: Instruction[] = []
+  for (const { source, file } of collectEntries(files)) {
+    const segments = splitArchivePath(file)
+    if (segments.length <= anchor) continue
+    const relativePath = segments.slice(anchor).join('/')
+    pushUnique(instructions, {
+      type: 'copy',
+      source,
+      destination: archiveJoin(GAME_FOLDER, 'Content', relativePath),
+    })
+  }
+  return { instructions, modType: MOD_TYPE_PAK_ALT }
 }
 
 export function installPak(context: IExtensionContext, files: string[]) {
@@ -588,16 +918,51 @@ export function installPak(context: IExtensionContext, files: string[]) {
   return { instructions, modType: MOD_TYPE_PAK }
 }
 
-export function installRoot(files: string[]) {
-  const instructions: Instruction[] = []
-  if (findUe4ssAnchor(files) !== null) return { instructions, modType: MOD_TYPE_ROOT }
+function installIntoBinaries(files: string[], anchor: string[] | null, modType: string) {
+  if (!anchor) return { instructions: [] as Instruction[], modType }
+  return {
+    instructions: deploySubtree(files, anchor, BINARIES_PATH),
+    modType,
+  }
+}
+
+/** ReShade bundle: its whole folder (ini + shader tree) goes beside the game exe. */
+export function installReshade(files: string[]) {
+  return installIntoBinaries(files, findMarkerDir(files, isReShadeIni), MOD_TYPE_BINARIES)
+}
+
+/** Bare ReShade preset `.ini`. */
+export function installPreset(files: string[]) {
+  return installIntoBinaries(files, findMarkerDir(files, isLoosePresetIni), MOD_TYPE_BINARIES)
+}
+
+/** Loose native DLL plugin(s); each plugin folder is flattened beside the game exe. */
+export function installBinaryDll(files: string[]) {
+  const anchors: string[][] = []
+  const seen = new Set<string>()
   for (const file of files) {
     const filePath = safeArchivePath(file)
-    if (!filePath || !isArchiveFile(file, files) || isDedicatedModLayout(filePath)) continue
-    const anchor = findRootAnchor(filePath)
+    if (!filePath || !isArchiveFile(file, files) || archiveExtName(filePath) !== '.dll') continue
+    const dir = splitArchivePath(filePath).slice(0, -1)
+    const key = dir.map((part) => part.toLowerCase()).join('/')
+    if (seen.has(key)) continue
+    seen.add(key)
+    anchors.push(dir)
+  }
+  const instructions: Instruction[] = []
+  for (const anchor of anchors) {
+    for (const instruction of deploySubtree(files, anchor, BINARIES_PATH)) pushUnique(instructions, instruction)
+  }
+  return { instructions, modType: MOD_TYPE_BINARIES }
+}
+
+export function installRoot(files: string[]) {
+  const instructions: Instruction[] = []
+  for (const { source, file } of collectEntries(files)) {
+    const anchor = findRootAnchor(file)
     if (!anchor) continue
-    const destination = splitArchivePath(filePath).slice(anchor.anchorIndex).join('/')
-    pushUnique(instructions, { type: 'copy', source: file, destination })
+    const destination = splitArchivePath(file).slice(anchor.anchorIndex).join('/')
+    pushUnique(instructions, { type: 'copy', source, destination })
   }
   return { instructions, modType: MOD_TYPE_ROOT }
 }
