@@ -24,12 +24,21 @@ Steam AppID `4115450`。扩展适配 UE 5.7 定制 fork，游戏目录结构与�
 
 ## 支持的 Mod 类型
 
-安装器优先级从低到高（数字小者先匹配）：UE4SS 本体 → 组合包 → LogicMod → 脚本 → DLL → UE4SS mod 文件夹 → 项目 Content → Paks 目录 → pak → Binaries → Root。
+安装器优先级从低到高（数字小者先匹配）：UE4SS 本体 → 组合包 → LogicMod → 脚本 → DLL → UE4SS mod 文件夹 → 项目 Content → PBZModLoader JS → Paks 目录 → pak → Binaries → Root。
+
+本游戏有**两套互不兼容的加载器**，目录与运行时完全不同：
+
+| 加载器 | 形态 | mod 位置 | Nexus |
+|---|---|---|---|
+| UE4SS（本扩展前置） | Lua / C++ | `platform/steam/ue4ss/Mods/<ModName>/` | mod 52「PBZ UE4SS」 |
+| PBZModLoader | PuerTS JavaScript/TypeScript | `ProjectPBZ/PBZModLoader/mods/<ModName>/main.js` | mod 113「PBZModLoader」 |
+
+两者不能互相替代。本扩展两种都支持；PBZModLoader 本身按 Root 规则安装（它是游戏相对路径结构），JS mod 则整目录落到 `mods/` 下。
 
 | Mod 类型 | tester 判定 | 安装位置 |
 |---|---|---|
 | UE4SS for Phantom Blade Zero | 同目录下有代理 DLL（`dwmapi.dll` / `xinput1_3.dll` / `xinput1_4.dll`）或 `UE4SS-settings.ini`，且配套 `ue4ss/UE4SS.dll` 或平铺的 `UE4SS.dll` | `platform/steam/<代理DLL>` + `platform/steam/ue4ss/**`（平铺布局则整目录落到 `platform/steam/`） |
-| UE4SS Script + Pak Combo | 同时有可安装 pak 与 `Scripts/`（或 `dlls/`）载荷 | pak → `~mods` 或 `LogicMods`，脚本 → `ue4ss/Mods/<ModName>/` |
+| UE4SS Script + Pak Combo | 同时有可安装 pak 与任意 UE4SS mod 根（`Scripts/`、`dlls/` 或带名字的 `enabled.txt` 文件夹） | pak → `~mods` 或 `LogicMods`，每个脚本 mod → `ue4ss/Mods/<各自文件夹>/` |
 | UE4SS LogicMod | 归档内任意深度含 `LogicMods/` 目录 | `ProjectPBZ/Content/Paks/LogicMods/`（同目录的 info 文件一并保留） |
 | UE4SS Script Mod | 含 `Scripts/**.lua` | `ue4ss/Mods/<ModName>/` + 自动 `enabled.txt` |
 | UE4SS DLL Mod | 含 `dlls/**.dll` | `ue4ss/Mods/<ModName>/` + 自动 `enabled.txt` |
@@ -38,6 +47,7 @@ Steam AppID `4115450`。扩展适配 UE 5.7 定制 fork，游戏目录结构与�
 | UE5 Pak Mod (Paks folder) | pak 位于**非** `~mods` / `LogicMods` 的 `Paks/` 目录树内 | `ProjectPBZ/Content/Paks/<相对路径>` |
 | UE5 Pak Mod | 含 pak，或成对的 `.utoc` + `.ucas`，且无脚本/DLL/项目树混装 | `ProjectPBZ/Content/Paks/~mods/`（扁平化） |
 | Binaries | 含 `ReShade.ini`、裸 ReShade preset `.ini`，或散装 `.dll` | `platform/steam/<相对路径>` |
+| PBZModLoader JS Mod | 存在含 `main.js` 的目录（且不是加载器本体、不含 pak/UE4SS 载荷） | `ProjectPBZ/PBZModLoader/mods/<该目录名>/`（整目录原样复制） |
 | Root Game Folder Mod | 归档内任意深度出现 `Engine/`、`ProjectPBZ/`、`platform/` 或 `steam/` 目录 | 从该目录起按路径原样覆盖 |
 
 ### 与 Nexus 官方 Vortex 扩展的对应关系
@@ -51,7 +61,7 @@ Nexus 官方的 `phantombladezero` 扩展（`Nexus-Mods/gdl-games`，v1.0.0）�
 | `content-folder` | Project Content Folder / Paks 目录 | 拆成 Content 与 Paks 两条，`Paks/` 树保留完整相对路径 |
 | `reshade` / `reshade-preset` | Binaries | 合并为一个类型，内部区分 ReShade.ini、preset、散装 DLL |
 | `logicmods` | UE4SS LogicMod | 一致 |
-| `ue4ss-lua` / `ue4ss-lua-enabled` / `ue4ss-cpp` / `ue4ss-lua-bare` | 脚本 / DLL / UE4SS Mod Folder | 按载荷标记合并为三类 |
+| `ue4ss-lua` / `ue4ss-lua-enabled` / `ue4ss-cpp` / `ue4ss-lua-bare` | 脚本 / DLL / UE4SS Mod Folder | 按载荷标记合并为三类，并支持一包多 mod 逐个部署 |
 | `config-ini` | **不处理** | Engine.ini 类配置本就属于 `%LOCALAPPDATA%`，按需求跳过 |
 | `pak` / `pak-iostore` / `pak-alt` | UE5 Pak Mod / Paks 目录 | 成对校验与扁平化一致 |
 
@@ -59,7 +69,7 @@ Nexus 官方的 `phantombladezero` 扩展（`Nexus-Mods/gdl-games`，v1.0.0）�
 
 - **UE4SS 是硬前置**：官方把 UE4SS 当普通 mod 安装，本扩展通过 `modId 128413` 声明为前置模组，并检测代理 DLL + 运行时就绪。
 - **就地改写运行时配置**：安装 UE4SS 时强制关闭 `bUseUObjectArrayCache`，`mods.txt` 存为 `mods.txt.original` 保留宿主基线。
-- **一个归档一个 UE4SS mod**：多 mod 文件夹直接报错，官方则是逐个 glob 路由。
+- **一包多 mod 各自成文件夹**：归档里的多个 UE4SS mod 分别落进各自的 `ue4ss/Mods/<名字>/`，绝不合并；不同路径的同名 mod 报错要求重命名，嵌套子目录归入外层 mod。
 
 Root 的判定方式：对每个文件从左到右找**最浅的**一个已知顶层目录（`Engine` / `ProjectPBZ` / `platform` / `steam`），该目录之前的部分全部当作压缩包包装层丢掉，从该目录开始拼出目标路径。因此 `Engine/...`、`MyMod/Engine/...`、`A/B/C/Engine/...`、`Extracted/PBZ/Engine/...`、乃至完整游戏目录 `PBZ/Engine/...` + `PBZ/ProjectPBZ/...` 都能正确落位。取最浅匹配是为了让 `ProjectPBZ/Engine/foo.ini` 保留 `ProjectPBZ` 前缀，而不是被误判成引擎目录。
 
@@ -77,13 +87,14 @@ Root 的判定方式：对每个文件从左到右找**最浅的**一个已知�
 - **混合包**：pak 与脚本两半可以各自在不同深度，互不影响；`~mods` 容器和 `LogicMods` 容器会自动分流到各自目录。
 - **UE4SS 本体**：代理 DLL 所在目录即安装根，`ue4ss/` 子树整目录透传；平铺布局（`UE4SS.dll` 紧邻代理 DLL）也支持。
 
-一个压缩包含多个 UE4SS mod 文件夹（不论深度）时会报错并列出名字，避免把两个 mod 合并进同一个文件夹。不同包装层下的同名 pak 也报错，提示存在多个变体。
+一个压缩包含**多个** UE4SS mod 文件夹时会分别部署到各自的 `ue4ss/Mods/<名字>/`，不会合并进同一个文件夹；两个不同路径的 mod 同名时报错，提示重命名。嵌套在另一个 mod 目录内部的 `Scripts/` 视为该 mod 的子目录，不再单独算一个 mod。不同包装层下的同名 pak 报错，提示存在多个变体。
 
 ## 关键约束
 
 - **UE4SS 必须是 PBZ 定制构建**。官方 release 不认这套目录结构，也缺少定制引擎的 `MemberVariableLayout.ini` 与 GObjects 签名，直接用会启动崩溃。因此扩展把它作为前置 Mod（`modId 128413`，即本项目的定制 UE4SS）向 Mod 管理器请求安装，并在本地 Mod 列表里标记为「前置模组」；检测到 `platform/steam` 下任一代理 DLL（`dwmapi.dll` / `xinput1_3.dll` / `xinput1_4.dll`）与 `ue4ss/UE4SS.dll`（或平铺 `UE4SS.dll`）同时存在时才认为前置已就绪。
 - **UE4SS 运行时文件整目录透传**。归档里 `ue4ss/` 下的 `MemberVariableLayout.ini`、`UE4SS_Signatures/`、`CustomGameConfigs/` 等都会按原样部署，安装器只改写 `UE4SS-settings.ini`（关掉 `bUseUObjectArrayCache`，该构建必须关闭）与 `Mods/mods.txt`（作为普通 copy，保留宿主原版基线以便禁用时回滚）。
-- **一个归档一个 UE4SS mod**。归档含多个 mod 文件夹时安装器直接报错，避免把两个 mod 合并进一个文件夹。
+- **一包多 mod 各自成文件夹**。归档含多个 UE4SS mod 文件夹时逐个部署到 `ue4ss/Mods/<名字>/`，不会合并；同名但路径不同的两个 mod 直接报错，提示重命名。
+- **PBZModLoader JS mod 整目录复制**。归档里含 `main.js` 的目录会整体（含子目录与其他文件）复制到 `ProjectPBZ/PBZModLoader/mods/<目录名>/`，不会只搬 `main.js`。`dist/` 构建目录会被剥掉一层，用上一级项目名作为 mod 名。本扩展不检测加载器是否已安装，也不会替你安装它。
 - **禁止符号链接部署**（`supportsSymlinks: false`）。游戏带 `global.utoc`，属于 IoStore；链接部署时 `.utoc`/`.ucas` 读回 0 字节，UE5 Zen 加载器会在启动时崩溃。Nexus 官方扩展与实测 A/B 都是这个结论，硬链接/移动部署正常。
 - **`~mods` 是唯一的普通 pak 目录**。`PBZMods` 是这个项目早期自造的目录名；它和 `~mods` 会同时挂载，同一份资源出现两个来源时没有确定胜负，已废弃。
 - **LogicMod 需要 BPModLoaderMod**。`LogicMods/` 下的蓝图包由 UE4SS 的 `BPModLoaderMod` 加载，未启用时 pak 不会生效。

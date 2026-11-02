@@ -12,6 +12,13 @@ export const UE4SS_RUNTIME_PATH = `${BINARIES_PATH}/ue4ss`
 export const UE4SS_MODS_PATH = `${UE4SS_RUNTIME_PATH}/Mods`
 export const PAK_MODS_PATH = `${GAME_FOLDER}/Content/Paks/~mods`
 export const LOGIC_MODS_PATH = `${GAME_FOLDER}/Content/Paks/LogicMods`
+// PBZModLoader (PuerTS JavaScript/TypeScript loader) discovers mods here, one
+// folder per mod with a `main.js` entry.
+export const PBZ_MODLOADER_PATH = `${GAME_FOLDER}/PBZModLoader`
+export const PBZ_MODLOADER_MODS_PATH = `${PBZ_MODLOADER_PATH}/mods`
+// Short alias for the deploy root JS mods use.
+export const JS_MODS_PATH = PBZ_MODLOADER_MODS_PATH
+export const JS_ENTRY_FILE = 'main.js'
 // Top-level directories a root mod may replace; `steam` holds the launcher and its stub.
 export const ROOT_DIRECTORIES = ['Engine', 'ProjectPBZ', 'platform', 'steam']
 
@@ -54,6 +61,7 @@ export const MOD_TYPE_PAK = `${GAME_ID}-pak`
 export const MOD_TYPE_PAK_ALT = `${GAME_ID}-pak-alt`
 export const MOD_TYPE_BINARIES = `${GAME_ID}-binaries`
 export const MOD_TYPE_CONTENT = `${GAME_ID}-content`
+export const MOD_TYPE_JS = `${GAME_ID}-pbzmodloader-mod`
 export const MOD_TYPE_ROOT = `${GAME_ID}-root`
 
 export const MOD_TYPE_PRIORITY = {
@@ -67,6 +75,7 @@ export const MOD_TYPE_PRIORITY = {
   pakAlt: 168,
   content: 165,
   binaries: 160,
+  js: 158,
   root: 100,
 } as const
 
@@ -79,6 +88,7 @@ export const INSTALLER_PRIORITY = {
   dll: 15,
   ue4ssFolder: 16,
   content: 17,
+  js: 18,
   pakAlt: 25,
   pak: 30,
   binaries: 35,
