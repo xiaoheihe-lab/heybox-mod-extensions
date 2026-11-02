@@ -14,6 +14,7 @@ import {
   MOD_TYPE_COMBO,
   MOD_TYPE_CONTENT,
   MOD_TYPE_DLL,
+  MOD_TYPE_JS,
   MOD_TYPE_LOGIC,
   MOD_TYPE_PAK,
   MOD_TYPE_PAK_ALT,
@@ -22,7 +23,9 @@ import {
   MOD_TYPE_UE4SS,
   MOD_TYPE_UE4SS_FOLDER,
   PAK_MODS_PATH,
+  PBZ_MODLOADER_MODS_PATH,
   ROOT_DIRECTORIES,
+  JS_ENTRY_FILE,
   UE_CONFIG_INI_NAMES,
   UE4SS_DLL,
   UE4SS_DWMAPI,
@@ -300,6 +303,44 @@ function findUe4ssModRoot(files: string[], marker?: { segment: string, extension
 const SCRIPT_MARKER = { segment: 'scripts', extensions: LUA_EXTENSIONS }
 const DLL_MARKER = { segment: 'dlls', extensions: DLL_EXTENSIONS }
 
+interface JsModRoot {
+  /** Folder that contains `main.js`; its tree is deployed verbatim. */
+  prefix: string[]
+  /** Deployed folder name under `PBZModLoader/mods`; empty when unnamed. */
+  folderId: string
+}
+
+/**
+ * Every PBZModLoader mod folder: a directory holding a `main.js` entry. A
+ * trailing `dist` segment is the build output folder, so the name comes from
+ * the project folder above it (the loader docs say not to install `dist`).
+ */
+function collectJsModRoots(files: string[]): JsModRoot[] {
+  const found: JsModRoot[] = []
+  const seen = new Set<string>()
+  for (const file of files) {
+    const filePath = safeArchivePath(file)
+    if (!filePath || !isArchiveFile(file, files)) continue
+    if (archiveBaseName(filePath).toLowerCase() !== JS_ENTRY_FILE) continue
+    const dir = splitArchivePath(filePath).slice(0, -1)
+    const key = dir.map((part) => part.toLowerCase()).join('/')
+    if (seen.has(key)) continue
+    seen.add(key)
+    let folderId = dir[dir.length - 1] ?? ''
+    if (folderId.toLowerCase() === 'dist') folderId = dir[dir.length - 2] ?? ''
+    found.push({ prefix: dir, folderId })
+  }
+  // A root nested inside another root is that mod's own sub-folder, not a
+  // second mod.
+  return found.filter((candidate) => !found.some((other) => (
+    other !== candidate
+    && other.prefix.length < candidate.prefix.length
+    && other.prefix.every((segment, index) => (
+      candidate.prefix[index]?.toLowerCase() === segment.toLowerCase()
+    ))
+  )))
+}
+
 /**
  * Subfolders that hold a mod's payload rather than being the mod itself.
  * `MyMod/Content/Scripts/x.lua` must land in `Mods/MyMod/Content/Scripts/`,
@@ -324,10 +365,30 @@ function splitModRoot(root: string[]): { prefixLength: number, folderId: string 
   return { prefixLength: root.length, folderId: '' }
 }
 
-/** Every distinct UE4SS mod root in the archive, with nested duplicates collapsed. */
-function collectUe4ssModRoots(files: string[]): string[][] {
-  const found: string[][] = []
+interface Ue4ssModRoot {
+  /** Archive prefix re-anchored under `ue4ss/Mods/<folderId>`. */
+  prefix: string[]
+  /** Deployed folder name; empty when the archive has no named mod folder. */
+  folderId: string
+}
+
+/**
+ * Every distinct UE4SS mod root in the archive. `Scripts` / `dlls` payload
+ * markers name the mod; a named `enabled.txt` folder also counts, so archives
+ * that ship dll-only mods (no Scripts tree) are not silently skipped.
+ */
+function collectUe4ssModRoots(files: string[]): Ue4ssModRoot[] {
+  const found: Ue4ssModRoot[] = []
   const seen = new Set<string>()
+  const push = (markerIndex: number, segments: string[]) => {
+    const root = segments.slice(0, markerIndex)
+    const { prefixLength, folderId } = splitModRoot(root)
+    const prefix = root.slice(0, prefixLength)
+    const key = prefix.map((part) => part.toLowerCase()).join('/')
+    if (seen.has(key)) return
+    seen.add(key)
+    found.push({ prefix, folderId })
+  }
   for (const { segment, extensions } of [SCRIPT_MARKER, DLL_MARKER]) {
     for (const file of files) {
       const filePath = safeArchivePath(file)
@@ -335,15 +396,28 @@ function collectUe4ssModRoots(files: string[]): string[][] {
       const segments = splitArchivePath(filePath)
       const markerIndex = segments.findIndex((part) => part.toLowerCase() === segment)
       if (markerIndex < 0) continue
-      const root = segments.slice(0, markerIndex)
-      const { prefixLength } = splitModRoot(root)
-      const key = root.slice(0, prefixLength).map((part) => part.toLowerCase()).join('/')
-      if (seen.has(key)) continue
-      seen.add(key)
-      found.push(root)
+      push(markerIndex, segments)
     }
   }
-  return found
+  for (const file of files) {
+    const filePath = safeArchivePath(file)
+    if (!filePath || archiveBaseName(filePath).toLowerCase() !== ENABLED_FILE.toLowerCase()) continue
+    const segments = splitArchivePath(filePath)
+    // A root-level enabled.txt has no mod folder name to deploy under.
+    if (segments.length < 2) continue
+    const markerIndex = segments.length - 1
+    push(markerIndex, segments)
+  }
+  // A root nested inside another root is that mod's own sub-tree (e.g.
+  // `ModA/Scripts/...` plus `ModA/Sub/Scripts/...`), not a second mod. Keep the
+  // shallowest root so it deploys as one folder instead of sprouting an extra one.
+  return found.filter((candidate) => !found.some((other) => (
+    other !== candidate
+    && other.prefix.length < candidate.prefix.length
+    && other.prefix.every((segment, index) => (
+      candidate.prefix[index]?.toLowerCase() === segment.toLowerCase()
+    ))
+  )))
 }
 
 /**
@@ -476,7 +550,9 @@ export function testCombo(files: string[], gameId: number | string) {
     && !isLoaderLayout(files)
     && !isGameRelativeLayout(files)
     && hasInstallablePak(files)
-    && findUe4ssModRoot(files) !== null,
+    // Any identified UE4SS mod root counts, including an enabled.txt-keyed
+    // folder that carries no Scripts/dlls tree.
+    && collectUe4ssModRoots(files).length > 0,
   )
 }
 
@@ -583,11 +659,30 @@ export function testBinaryDll(files: string[], gameId: number | string) {
   if (isGameRelativeLayout(files)) return testResult(false)
   if (hasInstallablePak(files) || hasBaseName(files, ENABLED_FILE)) return testResult(false)
   if (findUe4ssModRoot(files) !== null) return testResult(false)
+  // A JavaScript mod folder owns its `main.js` and neighbouring files.
+  if (collectJsModRoots(files).length > 0) return testResult(false)
   const hasReshade = hasBaseName(files, 'ReShade.ini')
   if (hasReshade) return testResult(false)
   const paths = collectEntries(files).map((entry) => entry.file)
   if (findContentAnchor(paths) !== null) return testResult(false)
   return testResult(findMarkerDir(files, (filePath) => archiveExtName(filePath) === '.dll') !== null)
+}
+
+/** A game-relative tree that already contains the loader itself. */
+function isModLoaderLayout(files: string[]): boolean {
+  return files.some((file) => {
+    const filePath = safeArchivePath(file)
+    return Boolean(filePath && findSegment(filePath, 'PBZModLoader') >= 0 && isArchiveFile(file, files))
+  })
+}
+
+/** A PBZModLoader JavaScript/TypeScript mod folder (has a `main.js` entry). */
+export function testJs(files: string[], gameId: number | string) {
+  if (!isPbz(gameId) || isFomodPackage(files) || isLoaderLayout(files)) return testResult(false)
+  if (isGameRelativeLayout(files)) return testResult(false)
+  if (hasInstallablePak(files) || hasBaseName(files, ENABLED_FILE)) return testResult(false)
+  if (findUe4ssModRoot(files) !== null) return testResult(false)
+  return testResult(collectJsModRoots(files).length > 0)
 }
 
 export function testRoot(files: string[], gameId: number | string) {
@@ -762,36 +857,56 @@ export function installLogic(files: string[]) {
 export function installUe4ssMod(files: string[], stagingPath: string | undefined, modType: string) {
   const roots = collectUe4ssModRoots(files)
   if (roots.length === 0) return { instructions: [] as Instruction[], modType }
-  if (roots.length > 1) {
-    const names = roots.map((root) => splitModRoot(root).folderId || '<archive root>').join(', ')
-    throw new Error(
-      `Phantom Blade Zero: the archive contains ${roots.length} UE4SS mods (${names}); install them one at a time so their folders stay separate`,
-    )
+
+  const fallbackId = fallbackFolderId(stagingPath)
+  const resolved = roots.map((root) => ({
+    prefix: root.prefix,
+    folderId: root.folderId || fallbackId,
+  }))
+
+  // Two different roots must not collapse into one folder: their files would
+  // silently merge into a single mod.
+  const claimed = new Map<string, string>()
+  for (const root of resolved) {
+    const key = root.folderId.toLowerCase()
+    const prefixKey = root.prefix.join('/').toLowerCase()
+    const previous = claimed.get(key)
+    if (previous !== undefined && previous !== prefixKey) {
+      throw new Error(
+        `Phantom Blade Zero: two UE4SS mods in this archive are named "${root.folderId}" (${previous || '<archive root>'} and ${prefixKey || '<archive root>'}); rename one so the folders stay separate`,
+      )
+    }
+    claimed.set(key, prefixKey)
   }
 
-  const root = roots[0]
-  const { prefixLength, folderId: detectedFolder } = splitModRoot(root)
-  const folderId = detectedFolder || fallbackFolderId(stagingPath)
+  // The deepest matching prefix owns a file, so nested roots never deploy the
+  // same file twice.
+  const ordered = [...resolved].sort((a, b) => b.prefix.length - a.prefix.length)
   const instructions: Instruction[] = [
-    { type: 'attribute', key: 'phantomBladeZeroUe4ssFolderId', value: folderId },
+    { type: 'attribute', key: 'phantomBladeZeroUe4ssFolderId', value: resolved[0].folderId },
   ]
-  let hasEnabledFile = false
+  if (resolved.length > 1) {
+    instructions.push({
+      type: 'attribute',
+      key: 'phantomBladeZeroUe4ssFolderIds',
+      value: resolved.map((root) => root.folderId),
+    })
+  }
 
-  // A game-relative Lua mod (`platform/steam/ue4ss/Mods/X/Scripts/...`) is
-  // re-anchored under `ue4ss/Mods/` so its folder name survives. Anything else
-  // that already starts inside the game folder keeps its game-relative path.
-  const gameAnchorIndex = findRootAnchor(root.join('/'))?.anchorIndex ?? null
-
+  const enabledFolders = new Set<string>()
   for (const file of files) {
     const filePath = safeArchivePath(file)
     if (!filePath || !isArchiveFile(file, files)) continue
     // Pak chunks belong to ~mods, never inside a UE4SS mod folder.
     if (isPakLike(filePath)) continue
     const segments = splitArchivePath(filePath)
-    const inRoot = root.slice(0, prefixLength).every((segment, index) => segments[index]?.toLowerCase() === segment.toLowerCase())
-    if (!inRoot) continue
+    const owner = ordered.find((root) => (
+      root.prefix.every((segment, index) => segments[index]?.toLowerCase() === segment.toLowerCase())
+    ))
+    if (!owner) continue
 
     let destination: string | null = null
+    // A path already inside a `ue4ss/Mods` tree keeps its folder name.
     const ue4ssModsIndex = segments.findIndex((segment, index) => (
       segment.toLowerCase() === 'ue4ss' && segments[index + 1]?.toLowerCase() === 'mods'
     ))
@@ -799,29 +914,30 @@ export function installUe4ssMod(files: string[], stagingPath: string | undefined
       const relativePath = segments.slice(ue4ssModsIndex + 2).join('/')
       if (relativePath) destination = archiveJoin(UE4SS_MODS_PATH, relativePath)
     }
-    if (!destination && gameAnchorIndex !== null) {
-      destination = segments.slice(gameAnchorIndex).join('/')
-    }
     if (!destination) {
-      const relativePath = segments.slice(prefixLength).join('/')
+      const relativePath = segments.slice(owner.prefix.length).join('/')
       if (!relativePath) continue
-      destination = archiveJoin(UE4SS_MODS_PATH, folderId, relativePath)
+      destination = archiveJoin(UE4SS_MODS_PATH, owner.folderId, relativePath)
     }
 
-    if (archiveBaseName(filePath).toLowerCase() === ENABLED_FILE.toLowerCase()) hasEnabledFile = true
+    if (archiveBaseName(filePath).toLowerCase() === ENABLED_FILE.toLowerCase()) {
+      enabledFolders.add(destination.split('/').slice(0, -1).join('/').toLowerCase())
+    }
     pushUnique(instructions, { type: 'copy', source: file, destination })
   }
 
-  if (!hasEnabledFile && instructions.some((instruction) => instruction.type === 'copy')) {
-    const firstCopy = instructions.find((instruction) => instruction.type === 'copy')
-    const destination = String(firstCopy?.destination ?? '')
-    const enabledFolder = destination.toLowerCase().startsWith(UE4SS_MODS_PATH.toLowerCase())
-      ? destination.split('/').slice(0, UE4SS_MODS_PATH.split('/').length + 1).join('/')
-      : archiveJoin(UE4SS_MODS_PATH, folderId)
+  // Every deployed mod folder gets an enabled.txt so UE4SS actually loads it.
+  for (const root of resolved) {
+    const folderPath = archiveJoin(UE4SS_MODS_PATH, root.folderId)
+    const deployed = instructions.some((instruction) => (
+      instruction.type === 'copy'
+      && String(instruction.destination).toLowerCase().startsWith(`${folderPath.toLowerCase()}/`)
+    ))
+    if (!deployed || enabledFolders.has(folderPath.toLowerCase())) continue
     instructions.push({
       type: 'generatefile',
       data: '',
-      destination: archiveJoin(enabledFolder, ENABLED_FILE),
+      destination: archiveJoin(folderPath, ENABLED_FILE),
     })
   }
 
@@ -836,16 +952,13 @@ export function installDll(files: string[], stagingPath?: string) {
   return installUe4ssMod(files, stagingPath, MOD_TYPE_DLL)
 }
 
-/** Installs an `enabled.txt`-keyed mod folder under `ue4ss/Mods/`. */
+/**
+ * Installs `enabled.txt`-keyed mod folder(s) under `ue4ss/Mods/`. Delegates to
+ * the shared multi-root installer so an archive shipping several mod folders
+ * deploys all of them instead of only the first.
+ */
 export function installUe4ssFolder(files: string[], stagingPath?: string) {
-  const anchor = findMarkerDir(files, (filePath) => archiveBaseName(filePath).toLowerCase() === ENABLED_FILE.toLowerCase())
-  if (!anchor) return { instructions: [], modType: MOD_TYPE_UE4SS_FOLDER }
-  const folderId = anchor[anchor.length - 1] || fallbackFolderId(stagingPath)
-  const instructions: Instruction[] = [
-    { type: 'attribute', key: 'phantomBladeZeroUe4ssFolderId', value: folderId },
-    ...deploySubtree(files, anchor, archiveJoin(UE4SS_MODS_PATH, folderId)),
-  ]
-  return { instructions, modType: MOD_TYPE_UE4SS_FOLDER }
+  return installUe4ssMod(files, stagingPath, MOD_TYPE_UE4SS_FOLDER)
 }
 
 /** Installs a bare `.lua` payload as a UE4SS mod folder. */
@@ -954,6 +1067,59 @@ export function installBinaryDll(files: string[]) {
     for (const instruction of deploySubtree(files, anchor, BINARIES_PATH)) pushUnique(instructions, instruction)
   }
   return { instructions, modType: MOD_TYPE_BINARIES }
+}
+
+/**
+ * Installs PBZModLoader mod folders under `ProjectPBZ/PBZModLoader/mods/`.
+ * The whole folder that holds `main.js` is copied verbatim, never just the
+ * entry file, which is what the loader's discovery expects.
+ */
+export function installJs(files: string[], stagingPath?: string) {
+  const roots = collectJsModRoots(files)
+  if (roots.length === 0) return { instructions: [] as Instruction[], modType: MOD_TYPE_JS }
+
+  const fallbackId = fallbackFolderId(stagingPath, 'PBZMod')
+  const resolved = roots.map((root) => ({
+    prefix: root.prefix,
+    folderId: root.folderId || fallbackId,
+  }))
+
+  // Two mods must never collapse into one folder.
+  const claimed = new Map<string, string>()
+  for (const root of resolved) {
+    const key = root.folderId.toLowerCase()
+    const prefixKey = root.prefix.join('/').toLowerCase()
+    const previous = claimed.get(key)
+    if (previous !== undefined && previous !== prefixKey) {
+      throw new Error(
+        `Phantom Blade Zero: two PBZModLoader mods in this archive are named "${root.folderId}" (${previous || '<archive root>'} and ${prefixKey || '<archive root>'}); rename one so the folders stay separate`,
+      )
+    }
+    claimed.set(key, prefixKey)
+  }
+
+  // The deepest matching prefix owns a file, so nested roots never deploy twice.
+  const ordered = [...resolved].sort((a, b) => b.prefix.length - a.prefix.length)
+  const instructions: Instruction[] = [
+    { type: 'attribute', key: 'phantomBladeZeroJsModIds', value: resolved.map((root) => root.folderId) },
+  ]
+
+  for (const { source, file } of collectEntries(files)) {
+    const segments = splitArchivePath(file)
+    const owner = ordered.find((root) => (
+      root.prefix.every((segment, index) => segments[index]?.toLowerCase() === segment.toLowerCase())
+    ))
+    if (!owner) continue
+    const relativePath = segments.slice(owner.prefix.length).join('/')
+    if (!relativePath) continue
+    pushUnique(instructions, {
+      type: 'copy',
+      source,
+      destination: archiveJoin(PBZ_MODLOADER_MODS_PATH, owner.folderId, relativePath),
+    })
+  }
+
+  return { instructions, modType: MOD_TYPE_JS }
 }
 
 export function installRoot(files: string[]) {

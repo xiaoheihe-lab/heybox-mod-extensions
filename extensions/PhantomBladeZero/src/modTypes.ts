@@ -6,6 +6,7 @@ import {
   MOD_TYPE_COMBO,
   MOD_TYPE_CONTENT,
   MOD_TYPE_DLL,
+  MOD_TYPE_JS,
   MOD_TYPE_LOGIC,
   MOD_TYPE_PAK,
   MOD_TYPE_PAK_ALT,
@@ -20,6 +21,7 @@ import {
   installCombo,
   installContent,
   installDll,
+  installJs,
   installLogic,
   installPak,
   installPakAlt,
@@ -31,6 +33,7 @@ import {
   testCombo,
   testContent,
   testDll,
+  testJs,
   testLogic,
   testPak,
   testPakAlt,
@@ -167,6 +170,15 @@ export function registerPhantomBladeZeroModTypes(context: IExtensionContext): vo
     INSTALLER_PRIORITY.binaries,
     testBinaries,
     installBinaries,
+  )
+  register(
+    context,
+    MOD_TYPE_JS,
+    MOD_TYPE_PRIORITY.js,
+    'PBZModLoader JS Mod',
+    INSTALLER_PRIORITY.js,
+    testJs,
+    (files: string[], stagingPath: string) => installJs(files, stagingPath),
   )
   register(
     context,

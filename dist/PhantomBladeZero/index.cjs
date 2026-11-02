@@ -63,6 +63,9 @@ var UE4SS_RUNTIME_PATH = `${BINARIES_PATH}/ue4ss`;
 var UE4SS_MODS_PATH = `${UE4SS_RUNTIME_PATH}/Mods`;
 var PAK_MODS_PATH = `${GAME_FOLDER}/Content/Paks/~mods`;
 var LOGIC_MODS_PATH = `${GAME_FOLDER}/Content/Paks/LogicMods`;
+var PBZ_MODLOADER_PATH = `${GAME_FOLDER}/PBZModLoader`;
+var PBZ_MODLOADER_MODS_PATH = `${PBZ_MODLOADER_PATH}/mods`;
+var JS_ENTRY_FILE = "main.js";
 var ROOT_DIRECTORIES = ["Engine", "ProjectPBZ", "platform", "steam"];
 var UE4SS_DLL = "UE4SS.dll";
 var UE4SS_DWMAPI = "dwmapi.dll";
@@ -92,6 +95,7 @@ var MOD_TYPE_PAK = `${GAME_ID}-pak`;
 var MOD_TYPE_PAK_ALT = `${GAME_ID}-pak-alt`;
 var MOD_TYPE_BINARIES = `${GAME_ID}-binaries`;
 var MOD_TYPE_CONTENT = `${GAME_ID}-content`;
+var MOD_TYPE_JS = `${GAME_ID}-pbzmodloader-mod`;
 var MOD_TYPE_ROOT = `${GAME_ID}-root`;
 var MOD_TYPE_PRIORITY = {
   ue4ss: 200,
@@ -104,6 +108,7 @@ var MOD_TYPE_PRIORITY = {
   pakAlt: 168,
   content: 165,
   binaries: 160,
+  js: 158,
   root: 100
 };
 var INSTALLER_PRIORITY = {
@@ -114,6 +119,7 @@ var INSTALLER_PRIORITY = {
   dll: 15,
   ue4ssFolder: 16,
   content: 17,
+  js: 18,
   pakAlt: 25,
   pak: 30,
   binaries: 35,
@@ -371,6 +377,23 @@ function findUe4ssModRoot(files, marker) {
 }
 var SCRIPT_MARKER = { segment: "scripts", extensions: LUA_EXTENSIONS };
 var DLL_MARKER = { segment: "dlls", extensions: DLL_EXTENSIONS };
+function collectJsModRoots(files) {
+  const found = [];
+  const seen = /* @__PURE__ */ new Set();
+  for (const file of files) {
+    const filePath = safeArchivePath(file);
+    if (!filePath || !isArchiveFile(file, files)) continue;
+    if (archiveBaseName(filePath).toLowerCase() !== JS_ENTRY_FILE) continue;
+    const dir = splitArchivePath(filePath).slice(0, -1);
+    const key = dir.map((part) => part.toLowerCase()).join("/");
+    if (seen.has(key)) continue;
+    seen.add(key);
+    let folderId = dir[dir.length - 1] ?? "";
+    if (folderId.toLowerCase() === "dist") folderId = dir[dir.length - 2] ?? "";
+    found.push({ prefix: dir, folderId });
+  }
+  return found.filter((candidate) => !found.some((other) => other !== candidate && other.prefix.length < candidate.prefix.length && other.prefix.every((segment, index) => candidate.prefix[index]?.toLowerCase() === segment.toLowerCase())));
+}
 var UE4SS_DATA_FOLDERS = /* @__PURE__ */ new Set(["content", "data", "config", "configs", "binaries", "plugins", "paks", "icons", "menu", "assets"]);
 function isDataFolder(segment) {
   return UE4SS_DATA_FOLDERS.has(segment.toLowerCase());
@@ -385,6 +408,15 @@ function splitModRoot(root) {
 function collectUe4ssModRoots(files) {
   const found = [];
   const seen = /* @__PURE__ */ new Set();
+  const push = (markerIndex, segments) => {
+    const root = segments.slice(0, markerIndex);
+    const { prefixLength, folderId } = splitModRoot(root);
+    const prefix = root.slice(0, prefixLength);
+    const key = prefix.map((part) => part.toLowerCase()).join("/");
+    if (seen.has(key)) return;
+    seen.add(key);
+    found.push({ prefix, folderId });
+  };
   for (const { segment, extensions } of [SCRIPT_MARKER, DLL_MARKER]) {
     for (const file of files) {
       const filePath = safeArchivePath(file);
@@ -392,15 +424,18 @@ function collectUe4ssModRoots(files) {
       const segments = splitArchivePath(filePath);
       const markerIndex = segments.findIndex((part) => part.toLowerCase() === segment);
       if (markerIndex < 0) continue;
-      const root = segments.slice(0, markerIndex);
-      const { prefixLength } = splitModRoot(root);
-      const key = root.slice(0, prefixLength).map((part) => part.toLowerCase()).join("/");
-      if (seen.has(key)) continue;
-      seen.add(key);
-      found.push(root);
+      push(markerIndex, segments);
     }
   }
-  return found;
+  for (const file of files) {
+    const filePath = safeArchivePath(file);
+    if (!filePath || archiveBaseName(filePath).toLowerCase() !== ENABLED_FILE.toLowerCase()) continue;
+    const segments = splitArchivePath(filePath);
+    if (segments.length < 2) continue;
+    const markerIndex = segments.length - 1;
+    push(markerIndex, segments);
+  }
+  return found.filter((candidate) => !found.some((other) => other !== candidate && other.prefix.length < candidate.prefix.length && other.prefix.every((segment, index) => candidate.prefix[index]?.toLowerCase() === segment.toLowerCase())));
 }
 function findRootAnchor(file) {
   const segments = splitArchivePath(file);
@@ -489,7 +524,7 @@ function testUe4ss(files, gameId) {
 }
 function testCombo(files, gameId) {
   return testResult(
-    isPbz(gameId) && !isFomodPackage(files) && !isLoaderLayout(files) && !isGameRelativeLayout(files) && hasInstallablePak(files) && findUe4ssModRoot(files) !== null
+    isPbz(gameId) && !isFomodPackage(files) && !isLoaderLayout(files) && !isGameRelativeLayout(files) && hasInstallablePak(files) && collectUe4ssModRoots(files).length > 0
   );
 }
 function testLogic(files, gameId) {
@@ -566,11 +601,19 @@ function testBinaryDll(files, gameId) {
   if (isGameRelativeLayout(files)) return testResult(false);
   if (hasInstallablePak(files) || hasBaseName(files, ENABLED_FILE)) return testResult(false);
   if (findUe4ssModRoot(files) !== null) return testResult(false);
+  if (collectJsModRoots(files).length > 0) return testResult(false);
   const hasReshade = hasBaseName(files, "ReShade.ini");
   if (hasReshade) return testResult(false);
   const paths = collectEntries(files).map((entry) => entry.file);
   if (findContentAnchor(paths) !== null) return testResult(false);
   return testResult(findMarkerDir(files, (filePath) => archiveExtName(filePath) === ".dll") !== null);
+}
+function testJs(files, gameId) {
+  if (!isPbz(gameId) || isFomodPackage(files) || isLoaderLayout(files)) return testResult(false);
+  if (isGameRelativeLayout(files)) return testResult(false);
+  if (hasInstallablePak(files) || hasBaseName(files, ENABLED_FILE)) return testResult(false);
+  if (findUe4ssModRoot(files) !== null) return testResult(false);
+  return testResult(collectJsModRoots(files).length > 0);
 }
 function testRoot(files, gameId) {
   if (!isPbz(gameId) || isFomodPackage(files)) return testResult(false);
@@ -695,52 +738,66 @@ function installLogic(files) {
 function installUe4ssMod(files, stagingPath, modType) {
   const roots = collectUe4ssModRoots(files);
   if (roots.length === 0) return { instructions: [], modType };
-  if (roots.length > 1) {
-    const names = roots.map((root2) => splitModRoot(root2).folderId || "<archive root>").join(", ");
-    throw new Error(
-      `Phantom Blade Zero: the archive contains ${roots.length} UE4SS mods (${names}); install them one at a time so their folders stay separate`
-    );
+  const fallbackId = fallbackFolderId(stagingPath);
+  const resolved = roots.map((root) => ({
+    prefix: root.prefix,
+    folderId: root.folderId || fallbackId
+  }));
+  const claimed = /* @__PURE__ */ new Map();
+  for (const root of resolved) {
+    const key = root.folderId.toLowerCase();
+    const prefixKey = root.prefix.join("/").toLowerCase();
+    const previous = claimed.get(key);
+    if (previous !== void 0 && previous !== prefixKey) {
+      throw new Error(
+        `Phantom Blade Zero: two UE4SS mods in this archive are named "${root.folderId}" (${previous || "<archive root>"} and ${prefixKey || "<archive root>"}); rename one so the folders stay separate`
+      );
+    }
+    claimed.set(key, prefixKey);
   }
-  const root = roots[0];
-  const { prefixLength, folderId: detectedFolder } = splitModRoot(root);
-  const folderId = detectedFolder || fallbackFolderId(stagingPath);
+  const ordered = [...resolved].sort((a, b) => b.prefix.length - a.prefix.length);
   const instructions = [
-    { type: "attribute", key: "phantomBladeZeroUe4ssFolderId", value: folderId }
+    { type: "attribute", key: "phantomBladeZeroUe4ssFolderId", value: resolved[0].folderId }
   ];
-  let hasEnabledFile = false;
-  const gameAnchorIndex = findRootAnchor(root.join("/"))?.anchorIndex ?? null;
+  if (resolved.length > 1) {
+    instructions.push({
+      type: "attribute",
+      key: "phantomBladeZeroUe4ssFolderIds",
+      value: resolved.map((root) => root.folderId)
+    });
+  }
+  const enabledFolders = /* @__PURE__ */ new Set();
   for (const file of files) {
     const filePath = safeArchivePath(file);
     if (!filePath || !isArchiveFile(file, files)) continue;
     if (isPakLike(filePath)) continue;
     const segments = splitArchivePath(filePath);
-    const inRoot = root.slice(0, prefixLength).every((segment, index) => segments[index]?.toLowerCase() === segment.toLowerCase());
-    if (!inRoot) continue;
+    const owner = ordered.find((root) => root.prefix.every((segment, index) => segments[index]?.toLowerCase() === segment.toLowerCase()));
+    if (!owner) continue;
     let destination = null;
     const ue4ssModsIndex = segments.findIndex((segment, index) => segment.toLowerCase() === "ue4ss" && segments[index + 1]?.toLowerCase() === "mods");
     if (ue4ssModsIndex >= 0 && segments.length > ue4ssModsIndex + 2) {
       const relativePath = segments.slice(ue4ssModsIndex + 2).join("/");
       if (relativePath) destination = archiveJoin(UE4SS_MODS_PATH, relativePath);
     }
-    if (!destination && gameAnchorIndex !== null) {
-      destination = segments.slice(gameAnchorIndex).join("/");
-    }
     if (!destination) {
-      const relativePath = segments.slice(prefixLength).join("/");
+      const relativePath = segments.slice(owner.prefix.length).join("/");
       if (!relativePath) continue;
-      destination = archiveJoin(UE4SS_MODS_PATH, folderId, relativePath);
+      destination = archiveJoin(UE4SS_MODS_PATH, owner.folderId, relativePath);
     }
-    if (archiveBaseName(filePath).toLowerCase() === ENABLED_FILE.toLowerCase()) hasEnabledFile = true;
+    if (archiveBaseName(filePath).toLowerCase() === ENABLED_FILE.toLowerCase()) {
+      enabledFolders.add(destination.split("/").slice(0, -1).join("/").toLowerCase());
+    }
     pushUnique(instructions, { type: "copy", source: file, destination });
   }
-  if (!hasEnabledFile && instructions.some((instruction) => instruction.type === "copy")) {
-    const firstCopy = instructions.find((instruction) => instruction.type === "copy");
-    const destination = String(firstCopy?.destination ?? "");
-    const enabledFolder = destination.toLowerCase().startsWith(UE4SS_MODS_PATH.toLowerCase()) ? destination.split("/").slice(0, UE4SS_MODS_PATH.split("/").length + 1).join("/") : archiveJoin(UE4SS_MODS_PATH, folderId);
+  for (const root of resolved) {
+    const folderPath = archiveJoin(UE4SS_MODS_PATH, root.folderId);
+    const deployed = instructions.some((instruction) => instruction.type === "copy" && String(instruction.destination).toLowerCase().startsWith(`${folderPath.toLowerCase()}/`));
+    if (!deployed || enabledFolders.has(folderPath.toLowerCase())) continue;
     instructions.push({
       type: "generatefile",
       data: "",
-      destination: archiveJoin(enabledFolder, ENABLED_FILE)
+      destination: archiveJoin(folderPath, ENABLED_FILE)
     });
   }
   return { instructions, modType };
@@ -752,14 +809,7 @@ function installDll(files, stagingPath) {
   return installUe4ssMod(files, stagingPath, MOD_TYPE_DLL);
 }
 function installUe4ssFolder(files, stagingPath) {
-  const anchor = findMarkerDir(files, (filePath) => archiveBaseName(filePath).toLowerCase() === ENABLED_FILE.toLowerCase());
-  if (!anchor) return { instructions: [], modType: MOD_TYPE_UE4SS_FOLDER };
-  const folderId = anchor[anchor.length - 1] || fallbackFolderId(stagingPath);
-  const instructions = [
-    { type: "attribute", key: "phantomBladeZeroUe4ssFolderId", value: folderId },
-    ...deploySubtree(files, anchor, archiveJoin(UE4SS_MODS_PATH, folderId))
-  ];
-  return { instructions, modType: MOD_TYPE_UE4SS_FOLDER };
+  return installUe4ssMod(files, stagingPath, MOD_TYPE_UE4SS_FOLDER);
 }
 function installLua(files, stagingPath) {
   const anchor = findMarkerDir(files, (filePath) => archiveExtName(filePath) === ".lua");
@@ -855,6 +905,44 @@ function installBinaryDll(files) {
     for (const instruction of deploySubtree(files, anchor, BINARIES_PATH)) pushUnique(instructions, instruction);
   }
   return { instructions, modType: MOD_TYPE_BINARIES };
+}
+function installJs(files, stagingPath) {
+  const roots = collectJsModRoots(files);
+  if (roots.length === 0) return { instructions: [], modType: MOD_TYPE_JS };
+  const fallbackId = fallbackFolderId(stagingPath, "PBZMod");
+  const resolved = roots.map((root) => ({
+    prefix: root.prefix,
+    folderId: root.folderId || fallbackId
+  }));
+  const claimed = /* @__PURE__ */ new Map();
+  for (const root of resolved) {
+    const key = root.folderId.toLowerCase();
+    const prefixKey = root.prefix.join("/").toLowerCase();
+    const previous = claimed.get(key);
+    if (previous !== void 0 && previous !== prefixKey) {
+      throw new Error(
+        `Phantom Blade Zero: two PBZModLoader mods in this archive are named "${root.folderId}" (${previous || "<archive root>"} and ${prefixKey || "<archive root>"}); rename one so the folders stay separate`
+      );
+    }
+    claimed.set(key, prefixKey);
+  }
+  const ordered = [...resolved].sort((a, b) => b.prefix.length - a.prefix.length);
+  const instructions = [
+    { type: "attribute", key: "phantomBladeZeroJsModIds", value: resolved.map((root) => root.folderId) }
+  ];
+  for (const { source, file } of collectEntries(files)) {
+    const segments = splitArchivePath(file);
+    const owner = ordered.find((root) => root.prefix.every((segment, index) => segments[index]?.toLowerCase() === segment.toLowerCase()));
+    if (!owner) continue;
+    const relativePath = segments.slice(owner.prefix.length).join("/");
+    if (!relativePath) continue;
+    pushUnique(instructions, {
+      type: "copy",
+      source,
+      destination: archiveJoin(PBZ_MODLOADER_MODS_PATH, owner.folderId, relativePath)
+    });
+  }
+  return { instructions, modType: MOD_TYPE_JS };
 }
 function installRoot(files) {
   const instructions = [];
@@ -996,6 +1084,15 @@ function registerPhantomBladeZeroModTypes(context) {
     INSTALLER_PRIORITY.binaries,
     testBinaries,
     installBinaries
+  );
+  register(
+    context,
+    MOD_TYPE_JS,
+    MOD_TYPE_PRIORITY.js,
+    "PBZModLoader JS Mod",
+    INSTALLER_PRIORITY.js,
+    testJs,
+    (files, stagingPath) => installJs(files, stagingPath)
   );
   register(
     context,
