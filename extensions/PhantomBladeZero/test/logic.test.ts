@@ -1,34 +1,54 @@
 import assert from 'node:assert/strict'
 import path from 'node:path'
 import {
+  BINARIES_PATH,
+  GAME_FOLDER,
   GAME_ID,
+  MOD_TYPE_BINARIES,
   MOD_TYPE_COMBO,
+  MOD_TYPE_CONTENT,
+  MOD_TYPE_DLL,
   MOD_TYPE_LOGIC,
   MOD_TYPE_PAK,
+  MOD_TYPE_PAK_ALT,
   MOD_TYPE_PRIORITY,
   MOD_TYPE_ROOT,
-  MOD_TYPE_UE4SS,
   MOD_TYPE_SCRIPT,
-  MOD_TYPE_DLL,
+  MOD_TYPE_UE4SS,
+  MOD_TYPE_UE4SS_FOLDER,
   LOGIC_MODS_PATH,
   PAK_MODS_PATH,
   UE4SS_MODS_PATH,
 } from '../src/constants'
 import {
+  installBinaries,
   installCombo,
-  installLogic,
-  installPak,
-  installRoot,
-  installUe4ss,
-  installScript,
+  installContent,
   installDll,
+  installLogic,
+  installLua,
+  installPak,
+  installPakAlt,
+  installPreset,
+  installReshade,
+  installRoot,
+  installScript,
+  installUe4ss,
+  installUe4ssFolder,
+  testBinaries,
   testCombo,
-  testLogic,
-  testPak,
-  testRoot,
-  testUe4ss,
-  testScript,
+  testContent,
   testDll,
+  testLogic,
+  testLua,
+  testPak,
+  testPakAlt,
+  testPreset,
+  testReshade,
+  testRoot,
+  testScript,
+  testUe4ss,
+  testUe4ssFolder,
 } from '../src/installers'
 import { registerPhantomBladeZeroModTypes } from '../src/modTypes'
 import { applyMutableFilePolicies } from '../src/policy'
@@ -51,13 +71,27 @@ function requirementContext(existingFiles: string[]) {
   } as any
 }
 
+function destinations(result: { instructions: Array<Record<string, unknown>> }): string[] {
+  return result.instructions
+    .filter((instruction) => instruction.type === 'copy' || instruction.type === 'generatefile')
+    .map((instruction) => String(instruction.destination))
+}
+
 async function main() {
   // --- UE4SS runtime ---
   assert.equal(testUe4ss(['UE4SS-3.0.1/dwmapi.dll', 'UE4SS-3.0.1/ue4ss/UE4SS.dll'], GAME_ID).supported, true)
-  assert.equal(testUe4ss(['UE4SS-3.0.1/dwmapi.dll', 'UE4SS-3.0.1/UE4SS.dll'], GAME_ID).supported, false)
+  // A flat runtime beside the proxy DLL is a valid loader too.
+  assert.equal(testUe4ss(['UE4SS-3.0.1/dwmapi.dll', 'UE4SS-3.0.1/UE4SS.dll'], GAME_ID).supported, true)
+  // xinput proxies are shipped by some repacks.
+  assert.equal(testUe4ss(['UE4SS-3.0.1/xinput1_3.dll', 'UE4SS-3.0.1/ue4ss/UE4SS.dll'], GAME_ID).supported, true)
+  assert.equal(testUe4ss(['UE4SS-3.0.1/xinput1_4.dll', 'UE4SS-3.0.1/ue4ss/UE4SS.dll'], GAME_ID).supported, true)
+  // A settings-only marker next to a runtime is also a loader.
+  assert.equal(testUe4ss(['UE4SS-3.0.1/UE4SS-settings.ini', 'UE4SS-3.0.1/ue4ss/UE4SS.dll'], GAME_ID).supported, true)
   assert.equal(testUe4ss(['UE4SS-3.0.1/dwmapi.dll'], GAME_ID).supported, false)
   assert.equal(testUe4ss(['UE4SS-3.0.1/dwmapi.dll', 'UE4SS-3.0.1/ue4ss/UE4SS.dll'], GAME_ID + 1).supported, false)
   assert.equal(testUe4ss(['Fomod/ModuleConfig.xml', 'dwmapi.dll', 'ue4ss/UE4SS.dll'], GAME_ID).supported, false)
+  // A game-relative loader tree belongs to root so no file is dropped.
+  assert.equal(testUe4ss(['PBZ/platform/steam/dwmapi.dll', 'PBZ/platform/steam/ue4ss/UE4SS.dll'], GAME_ID).supported, false)
 
   const settingsContext = {
     api: {
@@ -103,6 +137,18 @@ async function main() {
       destination: 'platform/steam/ue4ss/Mods/shared/Types.lua',
     },
     { type: 'copy', source: 'UE4SS-3.0.1/xinput1_3.dll', destination: 'platform/steam/xinput1_3.dll' },
+    { type: 'copy', source: 'UE4SS-3.0.1/README.md', destination: 'platform/steam/README.md' },
+  ])
+
+  const flatLoader = await installUe4ss(settingsContext, [
+    'UE4SS/dwmapi.dll',
+    'UE4SS/UE4SS.dll',
+    'UE4SS/UE4SS-settings.ini',
+  ], 'unused.installing')
+  assert.deepEqual(destinations(flatLoader), [
+    `${BINARIES_PATH}/dwmapi.dll`,
+    `${BINARIES_PATH}/UE4SS.dll`,
+    `${BINARIES_PATH}/UE4SS-settings.ini`,
   ])
 
   const mutable = applyMutableFilePolicies(ue4ss)
@@ -126,6 +172,8 @@ async function main() {
   assert.equal(testPak(['LogicMods/BossRush.pak'], GAME_ID).supported, false)
   assert.equal(testPak(['Scripts/main.lua', 'a.pak'], GAME_ID).supported, false)
   assert.equal(testPak(['dwmapi.dll', 'ue4ss/UE4SS.dll', 'a.pak'], GAME_ID).supported, false)
+  // A game-relative pak tree is owned by root, which keeps every file.
+  assert.equal(testPak(['ProjectPBZ/Content/Paks/~mods/Foo.pak'], GAME_ID).supported, false)
 
   const pak = installPak({} as any, [
     'Outer/Mod/PBZLightsaber_P.pak',
@@ -155,15 +203,25 @@ async function main() {
     { type: 'copy', source: 'Mod/PBZFoo_P.ucas', destination: `${PAK_MODS_PATH}/PBZFoo_P.ucas` },
   ])
 
-  // The bare triple at the archive root, in a mod folder, or wrapped deep all flatten into ~mods.
-  for (const prefix of ['', 'MyMod/', 'MyMod/Paks/', 'A/B/C/']) {
+  // The bare triple at the archive root or in a mod folder flattens into ~mods.
+  for (const prefix of ['', 'MyMod/', 'A/B/C/']) {
     const files = ['Foo_P.pak', 'Foo_P.utoc', 'Foo_P.ucas'].map((name) => `${prefix}${name}`)
     assert.equal(testPak(files, GAME_ID).supported, true)
     assert.deepEqual(
-      installPak({} as any, files).instructions.filter((instruction: any) => instruction.type === 'copy').map((instruction: any) => instruction.destination),
+      destinations(installPak({} as any, files)),
       ['Foo_P.pak', 'Foo_P.utoc', 'Foo_P.ucas'].map((name) => `${PAK_MODS_PATH}/${name}`),
     )
   }
+
+  // --- Bundled Paks/ tree (Nexus `pak-alt`) ---
+  const pakAltFiles = ['mod/Paks/sub/x.pak', 'mod/Paks/sub/x.ucas', 'mod/Paks/sub/x.utoc']
+  assert.equal(testPakAlt(pakAltFiles, GAME_ID).supported, true)
+  assert.equal(testPak(pakAltFiles, GAME_ID).supported, false)
+  assert.deepEqual(destinations(installPakAlt(pakAltFiles)), [
+    `${GAME_FOLDER}/Content/Paks/sub/x.pak`,
+    `${GAME_FOLDER}/Content/Paks/sub/x.ucas`,
+    `${GAME_FOLDER}/Content/Paks/sub/x.utoc`,
+  ])
 
   // --- LogicMods ---
   assert.equal(testLogic(['Wrapper/LogicMods/BossRush.pak'], GAME_ID).supported, true)
@@ -228,11 +286,33 @@ async function main() {
     false,
   )
 
-  const legacy = installScript(
-    ['PBZ/platform/steam/ue4ss/Mods/CoolMod/Scripts/main.lua'],
-    'unused.installing',
-  )
-  assert.deepEqual(legacy.instructions[0], { type: 'attribute', key: 'phantomBladeZeroUe4ssFolderId', value: 'CoolMod' })
+  // A full-game-path Lua mod is game-relative, so root keeps the whole tree intact.
+  const legacy = installRoot(['PBZ/platform/steam/ue4ss/Mods/CoolMod/Scripts/main.lua'])
+  assert.deepEqual(legacy.instructions, [
+    {
+      type: 'copy',
+      source: 'PBZ/platform/steam/ue4ss/Mods/CoolMod/Scripts/main.lua',
+      destination: 'platform/steam/ue4ss/Mods/CoolMod/Scripts/main.lua',
+    },
+  ])
+  assert.equal(testScript(['PBZ/platform/steam/ue4ss/Mods/CoolMod/Scripts/main.lua'], GAME_ID).supported, false)
+  // A game-relative archive that also ships a pak stays whole with root, so neither
+  // half is dropped (Nexus mod 7 / 19 shape).
+  assert.equal(testScript([
+    'PBZ/ProjectPBZ/Content/Paks/~mods/Foo_P.pak',
+    'PBZ/platform/steam/ue4ss/Mods/CoolMod/Scripts/main.lua',
+  ], GAME_ID).supported, false)
+  assert.equal(testCombo([
+    'PBZ/ProjectPBZ/Content/Paks/~mods/Foo_P.pak',
+    'PBZ/platform/steam/ue4ss/Mods/CoolMod/Scripts/main.lua',
+  ], GAME_ID).supported, false)
+  assert.deepEqual(destinations(installRoot([
+    'PBZ/ProjectPBZ/Content/Paks/~mods/Foo_P.pak',
+    'PBZ/platform/steam/ue4ss/Mods/CoolMod/Scripts/main.lua',
+  ])), [
+    'ProjectPBZ/Content/Paks/~mods/Foo_P.pak',
+    'platform/steam/ue4ss/Mods/CoolMod/Scripts/main.lua',
+  ])
 
   const looseLua = installScript(['Scripts/main.lua'], 'C:/staging/MyCoolMod.installing')
   assert.deepEqual(looseLua.instructions[0], {
@@ -291,6 +371,81 @@ async function main() {
   const scriptAndDll = installScript(['ModA/Scripts/a.lua', 'ModA/dlls/A.dll'], 'unused.installing')
   assert.equal(scriptAndDll.instructions.filter((instruction: any) => instruction.type === 'copy').length, 2)
 
+  // --- enabled.txt-keyed mod folder (Nexus `ue4ss-lua-enabled`) ---
+  const folderMod = ['ZCUnlocked/enabled.txt', 'ZCUnlocked/Payload.dll', 'README.txt']
+  assert.equal(testUe4ssFolder(folderMod, GAME_ID).supported, true)
+  assert.equal(testDll(folderMod, GAME_ID).supported, false)
+  assert.deepEqual(destinations(installUe4ssFolder(folderMod, 'unused.installing')), [
+    `${UE4SS_MODS_PATH}/ZCUnlocked/enabled.txt`,
+    `${UE4SS_MODS_PATH}/ZCUnlocked/Payload.dll`,
+  ])
+  // A root-level enabled.txt has no mod folder name to deploy under.
+  assert.equal(testUe4ssFolder(['enabled.txt', 'Payload.dll'], GAME_ID).supported, false)
+
+  // --- Bare Lua (Nexus `ue4ss-lua-bare`) ---
+  const bareLua = ['LuaMod/main.lua', 'LuaMod/helper.lua']
+  assert.equal(testLua(bareLua, GAME_ID).supported, true)
+  assert.equal(testScript(bareLua, GAME_ID).supported, false)
+  assert.deepEqual(destinations(installLua(bareLua, 'unused.installing')), [
+    `${UE4SS_MODS_PATH}/LuaMod/main.lua`,
+    `${UE4SS_MODS_PATH}/LuaMod/helper.lua`,
+    `${UE4SS_MODS_PATH}/LuaMod/enabled.txt`,
+  ])
+  // A bare .lua at the archive root uses the staging folder name.
+  assert.deepEqual(destinations(installLua(['main.lua'], 'C:/staging/MyLuaMod.installing')), [
+    `${UE4SS_MODS_PATH}/MyLuaMod/main.lua`,
+    `${UE4SS_MODS_PATH}/MyLuaMod/enabled.txt`,
+  ])
+
+  // --- Project content folder (Nexus `content-folder`) ---
+  const contentFiles = ['Content/Foo.uasset', 'Content/Bar.uexp', 'Config/DefaultEngine.ini']
+  assert.equal(testContent(contentFiles, GAME_ID).supported, true)
+  assert.equal(testPak(contentFiles, GAME_ID).supported, false)
+  assert.deepEqual(destinations(installContent(contentFiles)), [
+    `${GAME_FOLDER}/Content/Foo.uasset`,
+    `${GAME_FOLDER}/Content/Bar.uexp`,
+    `${GAME_FOLDER}/Config/DefaultEngine.ini`,
+  ])
+  // The same tree wrapped in a mod folder keeps the wrapper stripped.
+  assert.equal(testContent(['MyMod/Content/Foo.uasset', 'MyMod/Config/DefaultEngine.ini'], GAME_ID).supported, true)
+  assert.deepEqual(
+    destinations(installContent(['MyMod/Content/Foo.uasset', 'MyMod/Config/DefaultEngine.ini'])),
+    [`${GAME_FOLDER}/Content/Foo.uasset`, `${GAME_FOLDER}/Config/DefaultEngine.ini`],
+  )
+
+  // --- ReShade / preset / loose DLL (Nexus `reshade`, `reshade-preset`, `native-dll`) ---
+  const reshade = ['WarmSun/ReShade.ini', 'WarmSun/WarmSun.ini', 'WarmSun/reshade-shaders/Shaders/Clarity.fx']
+  assert.equal(testReshade(reshade, GAME_ID).supported, true)
+  assert.equal(testPreset(reshade, GAME_ID).supported, false)
+  assert.equal(testBinaries(reshade, GAME_ID).supported, true)
+  assert.deepEqual(destinations(installReshade(reshade)), [
+    `${BINARIES_PATH}/ReShade.ini`,
+    `${BINARIES_PATH}/WarmSun.ini`,
+    `${BINARIES_PATH}/reshade-shaders/Shaders/Clarity.fx`,
+  ])
+
+  const preset = ['Vibrant Reshade.ini', 'ReadMe.txt']
+  assert.equal(testPreset(preset, GAME_ID).supported, true)
+  assert.equal(testReshade(preset, GAME_ID).supported, false)
+  assert.deepEqual(destinations(installPreset(preset)), [
+    `${BINARIES_PATH}/Vibrant Reshade.ini`,
+    `${BINARIES_PATH}/ReadMe.txt`,
+  ])
+  // UE user config ini files are not presets and stay unsupported by design.
+  for (const name of ['Engine.ini', 'Game.ini', 'GameUserSettings.ini', 'Input.ini', 'Scalability.ini']) {
+    assert.equal(testPreset([name], GAME_ID).supported, false)
+    assert.equal(testBinaries([name], GAME_ID).supported, false)
+  }
+
+  const nativeDll = ['SomePlugin.dll']
+  assert.equal(testBinaries(nativeDll, GAME_ID).supported, true)
+  assert.deepEqual(destinations(installBinaries(nativeDll)), [`${BINARIES_PATH}/SomePlugin.dll`])
+  // A nested plugin folder is flattened beside the game executable.
+  assert.deepEqual(
+    destinations(installBinaries(['Ultimate-ASI-Loader/winmm.dll', 'Ultimate-ASI-Loader/Readme.txt'])),
+    [`${BINARIES_PATH}/winmm.dll`, `${BINARIES_PATH}/Readme.txt`],
+  )
+
   // --- Mixed script + pak combo ---
   const comboFiles = [
     'Bundle/BossRush_P.pak',
@@ -305,6 +460,16 @@ async function main() {
   // A LogicMod container plus scripts is still a mixed mod: both halves must land.
   assert.equal(testCombo(['Bundle/LogicMods/Menu.pak', 'Bundle/Scripts/main.lua'], GAME_ID).supported, true)
   assert.equal(testLogic(['Bundle/LogicMods/Menu.pak', 'Bundle/Scripts/main.lua'], GAME_ID).supported, true)
+  // A LogicMod sidecar (info file) inside the container folder rides along.
+  const logicSidecar = installCombo({} as any, [
+    'Bundle/LogicMods/Menu.pak',
+    'Bundle/LogicMods/Menu.ue4sslogicmod.info',
+    'Bundle/Scripts/main.lua',
+  ], 'unused.installing')
+  assert.ok(logicSidecar.instructions.some((instruction: any) => (
+    instruction.type === 'copy'
+    && instruction.destination === `${LOGIC_MODS_PATH}/Menu.ue4sslogicmod.info`
+  )))
   // A pak next to an unrelated loose file is still a plain pak mod.
   assert.equal(testPak(['Bundle/Cool_P.pak', 'Bundle/readme.lua'], GAME_ID).supported, true)
 
@@ -391,15 +556,18 @@ async function main() {
     () => installRoot(['A/Engine/Config/BaseEngine.ini', 'B/C/Engine/Config/BaseEngine.ini']),
     /multiple archive files target Engine\/Config\/BaseEngine\.ini/,
   )
-  // A complete UE4SS proxy install belongs to the UE4SS type even when it sits under the game root.
-  assert.equal(testRoot(['PBZ/platform/steam/dwmapi.dll', 'PBZ/platform/steam/ue4ss/UE4SS.dll'], GAME_ID).supported, false)
-  assert.deepEqual(installRoot(['PBZ/platform/steam/dwmapi.dll', 'PBZ/platform/steam/ue4ss/UE4SS.dll']).instructions, [])
-  // Dedicated layouts must never be deployed through the root route.
-  assert.equal(testRoot(['Mod/platform/steam/ue4ss/Mods/Cool/Scripts/main.lua'], GAME_ID).supported, false)
-  assert.equal(testRoot(['Mod/platform/steam/ue4ss/UE4SS-settings.ini'], GAME_ID).supported, false)
-  assert.equal(testRoot(['Mod/ProjectPBZ/Content/Paks/~mods/Foo.pak'], GAME_ID).supported, false)
-  assert.equal(testRoot(['Mod/ProjectPBZ/Content/Paks/Foo.pak'], GAME_ID).supported, false)
-  assert.equal(testRoot(['Mod/ProjectPBZ/Content/Paks/LogicMods/Menu.pak'], GAME_ID).supported, false)
+  // A game-relative tree deploys whole, including paks, scripts and the loader, so
+  // no file is dropped (Nexus `root` / `wrapped-root`).
+  assert.deepEqual(installRoot([
+    'ABZ/ProjectPBZ/Content/Paks/~mods/No-Intro_P.pak',
+    'ABZ/platform/steam/No-Intro.asi',
+    'ABZ/readme.txt',
+  ]).instructions, [
+    { type: 'copy', source: 'ABZ/ProjectPBZ/Content/Paks/~mods/No-Intro_P.pak', destination: 'ProjectPBZ/Content/Paks/~mods/No-Intro_P.pak' },
+    { type: 'copy', source: 'ABZ/platform/steam/No-Intro.asi', destination: 'platform/steam/No-Intro.asi' },
+  ])
+  assert.equal(testRoot(['PBZ/platform/steam/dwmapi.dll', 'PBZ/platform/steam/ue4ss/UE4SS.dll'], GAME_ID).supported, true)
+  assert.equal(testRoot(['Mod/ProjectPBZ/Content/Paks/LogicMods/Menu.pak'], GAME_ID).supported, true)
   assert.equal(testRoot(['Mod/Engine/Binaries/Win64/Foo.dll'], GAME_ID + 1).supported, false)
 
   const root = installRoot([
@@ -413,14 +581,6 @@ async function main() {
     { type: 'copy', source: 'Mod/ProjectPBZ/Content/Movies/intro.bk2', destination: 'ProjectPBZ/Content/Movies/intro.bk2' },
   ])
   assert.throws(() => installRoot(['A/ProjectPBZ/Content/Movies/a.bk2', 'B/ProjectPBZ/Content/Movies/a.bk2']), /multiple archive files target/)
-  // Dedicated layouts are filtered out of a root package instead of being double-deployed.
-  assert.deepEqual(installRoot([
-    'Mod/Engine/Config/BaseEngine.ini',
-    'Mod/ProjectPBZ/Content/Paks/~mods/Foo.pak',
-    'Mod/platform/steam/ue4ss/Mods/Cool/Scripts/main.lua',
-  ]).instructions, [
-    { type: 'copy', source: 'Mod/Engine/Config/BaseEngine.ini', destination: 'Engine/Config/BaseEngine.ini' },
-  ])
 
   // --- Registration ---
   const modTypes: Array<{ id: string, priority: number, name?: string }> = []
@@ -438,8 +598,12 @@ async function main() {
     MOD_TYPE_COMBO,
     MOD_TYPE_LOGIC,
     MOD_TYPE_SCRIPT,
-  MOD_TYPE_DLL,
+    MOD_TYPE_DLL,
+    MOD_TYPE_UE4SS_FOLDER,
+    MOD_TYPE_CONTENT,
+    MOD_TYPE_PAK_ALT,
     MOD_TYPE_PAK,
+    MOD_TYPE_BINARIES,
     MOD_TYPE_ROOT,
   ])
   assert.equal(modTypes[0].priority, Math.max(...Object.values(MOD_TYPE_PRIORITY)))
@@ -464,8 +628,12 @@ async function main() {
   ])
   const gamePath = path.join('E:', 'SteamLibrary', 'steamapps', 'common', 'PBZ')
   const dwmapiPath = path.join(gamePath, 'platform/steam', 'dwmapi.dll')
+  const xinputPath = path.join(gamePath, 'platform/steam', 'xinput1_4.dll')
   const dllPath = path.join(gamePath, 'platform/steam', 'ue4ss', 'UE4SS.dll')
+  const flatDllPath = path.join(gamePath, 'platform/steam', 'UE4SS.dll')
   assert.equal((await getRequirementStatus(requirementContext([dwmapiPath, dllPath]), gamePath)).installed, true)
+  assert.equal((await getRequirementStatus(requirementContext([xinputPath, dllPath]), gamePath)).installed, true)
+  assert.equal((await getRequirementStatus(requirementContext([dwmapiPath, flatDllPath]), gamePath)).installed, true)
   assert.equal((await getRequirementStatus(requirementContext([dwmapiPath]), gamePath)).installed, false)
   assert.equal((await getRequirementStatus(requirementContext([dllPath]), gamePath)).installed, false)
   assert.equal((await getRequirementStatus(requirementContext([]), gamePath)).requirements.length, 1)
