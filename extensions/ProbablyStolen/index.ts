@@ -3,17 +3,37 @@ import type { IExtensionContext } from 'heybox-mod-api'
 const GAME_ID = 4348910
 const MELONLOADER_REQUIREMENT_MOD_ID = '129002'
 const EXECUTABLE = 'Probably Stolen.exe'
-const REQUIRED_GAME_FILES = [EXECUTABLE, 'UnityPlayer.dll', 'GameAssembly.dll',
-  'Probably Stolen_Data/il2cpp_data/Metadata/global-metadata.dat']
+const REQUIRED_GAME_FILES = [EXECUTABLE, 'UnityPlayer.dll']
 type Loader = 'melonloader' | 'bepinex'
 type Kind = Loader | 'mods'
+type Backend = 'il2cpp' | 'mono'
 type Copy = { type: 'copy'; source: string; destination: string }
 const modType = (kind: Kind) => `${GAME_ID}-${kind}`
-const RUNTIME_FILES: Record<Loader, string[]> = {
-  melonloader: ['version.dll', 'MelonLoader/net6/MelonLoader.dll', 'MelonLoader/net6/MelonLoader.runtimeconfig.json'],
-  bepinex: ['winhttp.dll', 'doorstop_config.ini', 'BepInEx/core/BepInEx.Unity.IL2CPP.dll',
-    'BepInEx/core/BepInEx.Core.dll', 'dotnet/coreclr.dll'],
+// The Demo ships IL2CPP while the retail build ships Mono; detect the backend from the game files.
+const BACKENDS: Backend[] = ['il2cpp', 'mono']
+const BACKEND_FILES: Record<Backend, string[]> = {
+  il2cpp: ['GameAssembly.dll', 'Probably Stolen_Data/il2cpp_data/Metadata/global-metadata.dat'],
+  mono: ['Probably Stolen_Data/Managed/Assembly-CSharp.dll'],
 }
+const BACKEND_LABEL: Record<Backend, string> = { il2cpp: 'IL2CPP', mono: 'Mono' }
+const INJECTOR: Record<Loader, string> = { melonloader: 'version.dll', bepinex: 'winhttp.dll' }
+// Accepted runtime layouts per backend. The MelonLoader x64 ZIP carries both net35 and net6 runtimes.
+const RUNTIME_LAYOUTS: Record<Loader, Record<Backend, string[][]>> = {
+  melonloader: {
+    il2cpp: [['version.dll', 'MelonLoader/net6/MelonLoader.dll', 'MelonLoader/net6/MelonLoader.runtimeconfig.json']],
+    mono: [['version.dll', 'MelonLoader/net35/MelonLoader.dll']],
+  },
+  bepinex: {
+    il2cpp: [['winhttp.dll', 'doorstop_config.ini', 'BepInEx/core/BepInEx.Unity.IL2CPP.dll',
+      'BepInEx/core/BepInEx.Core.dll', 'dotnet/coreclr.dll']],
+    mono: [
+      ['winhttp.dll', 'doorstop_config.ini', 'BepInEx/core/BepInEx.dll'],
+      ['winhttp.dll', 'doorstop_config.ini', 'BepInEx/core/BepInEx.Unity.Mono.dll', 'BepInEx/core/BepInEx.Core.dll'],
+    ],
+  },
+}
+const runtimeLayouts = (loader: Loader, backend?: Backend) =>
+  backend ? RUNTIME_LAYOUTS[loader][backend] : BACKENDS.flatMap(b => RUNTIME_LAYOUTS[loader][b])
 const ROOTS = new Map(['Mods', 'Plugins', 'UserData', 'UserLibs', 'BepInEx'].map(p => [p.toLowerCase(), p]))
 const BLOCKED = /\.(exe|bat|cmd|ps1|vbs|msi|lnk|reg|sh)$/i
 const INJECTORS = new Set(['version.dll', 'winhttp.dll', 'dobby.dll', 'gameassembly.dll', 'unityplayer.dll'])
@@ -29,14 +49,15 @@ function safePath(source: string): string | undefined {
   return value
 }
 
-function runtimeRoot(files: string[], loader: Loader): string | undefined {
+function runtimeRoot(files: string[], loader: Loader, backend?: Backend): string | undefined {
   const paths = files.map(safePath).filter((p): p is string => !!p)
   const names = new Set(paths.map(p => p.toLowerCase()))
-  const marker = RUNTIME_FILES[loader][0].toLowerCase()
+  const marker = INJECTOR[loader].toLowerCase()
   for (const path of paths) {
     if (path.split('/').at(-1)?.toLowerCase() !== marker) continue
     const prefix = path.slice(0, -marker.length)
-    if (RUNTIME_FILES[loader].every(p => names.has((prefix + p).toLowerCase()))) return prefix
+    if (runtimeLayouts(loader, backend).some(layout => layout.every(p => names.has((prefix + p).toLowerCase()))))
+      return prefix
   }
   return undefined
 }
@@ -60,9 +81,11 @@ function checkedInstructions(instructions: Copy[]): Copy[] {
   return instructions
 }
 
-function runtimeInstructions(files: string[], loader: Loader): Copy[] {
-  const prefix = runtimeRoot(files, loader)
-  if (prefix === undefined) throw new Error('请选择完整的 Windows x64 IL2CPP 预载器 ZIP。')
+function runtimeInstructions(files: string[], loader: Loader, backend?: Backend): Copy[] {
+  const prefix = runtimeRoot(files, loader, backend)
+  if (prefix === undefined) {
+    throw new Error(`请选择完整的 Windows x64 ${backend ? `${BACKEND_LABEL[backend]} ` : ''}预载器 ZIP。`)
+  }
   const result: Copy[] = []
   for (const source of files) {
     const path = safePath(source)
@@ -113,7 +136,16 @@ export default async function main(context: IExtensionContext): Promise<boolean>
     try { return Boolean((await context.api.util.fs.stat(context.api.util.path.join(root, relative)))?.isFile) }
     catch { return false }
   }
-  const validGame = async (path: string) => (await Promise.all(REQUIRED_GAME_FILES.map(p => exists(path, p)))).every(Boolean)
+  const missing = async (root: string, files: string[]) => {
+    const present = await Promise.all(files.map(p => exists(root, p)))
+    return files.filter((_, i) => !present[i])
+  }
+  const detectBackend = async (path: string): Promise<Backend | undefined> => {
+    if ((await missing(path, REQUIRED_GAME_FILES)).length) return undefined
+    for (const backend of BACKENDS) if (!(await missing(path, BACKEND_FILES[backend])).length) return backend
+    return undefined
+  }
+  const validGame = async (path: string) => !!await detectBackend(path)
   const findGamePath = async (): Promise<string | undefined> => {
     if (selectedPath && await validGame(selectedPath)) return selectedPath
     const found = await context.api.util.GameStoreHelper.findByAppId(GAME_ID)
@@ -125,15 +157,23 @@ export default async function main(context: IExtensionContext): Promise<boolean>
   }
   const getLoaderStatus = async () => {
     const gamePath = await findGamePath()
+    const backend = gamePath ? await detectBackend(gamePath) : undefined
     const read = async (loader: Loader) => {
-      const missingFiles: string[] = []
-      for (const file of RUNTIME_FILES[loader]) if (!gamePath || !await exists(gamePath, file)) missingFiles.push(file)
-      return { installed: missingFiles.length === 0, missingFiles,
-        injectorPresent: !!gamePath && await exists(gamePath, RUNTIME_FILES[loader][0]) }
+      // Report the closest layout for the detected backend; an unknown game reports the IL2CPP defaults.
+      const layouts = RUNTIME_LAYOUTS[loader][backend ?? 'il2cpp']
+      let missingFiles = layouts[0]
+      if (gamePath) {
+        for (const layout of layouts) {
+          const result = await missing(gamePath, layout)
+          if (result.length < missingFiles.length) missingFiles = result
+        }
+      }
+      return { installed: !!gamePath && missingFiles.length === 0, missingFiles,
+        injectorPresent: !!gamePath && await exists(gamePath, INJECTOR[loader]) }
     }
     const melonloader = await read('melonloader')
     const bepinex = await read('bepinex')
-    return { gamePath: gamePath ?? '', melonloader, bepinex,
+    return { gamePath: gamePath ?? '', backend: (backend ?? '') as Backend | '', melonloader, bepinex,
       conflict: melonloader.injectorPresent && bepinex.injectorPresent }
   }
   const getExtensionRequiredMods = async () => {
@@ -161,7 +201,7 @@ export default async function main(context: IExtensionContext): Promise<boolean>
     executable: EXECUTABLE, requiredFiles: REQUIRED_GAME_FILES, queryPath: findGamePath,
     setup: async (discovery: { path?: string; gamePath?: string }) => {
       const candidate = discovery?.path || discovery?.gamePath
-      if (candidate && !await validGame(candidate)) throw new Error('请选择包含 Probably Stolen.exe 的 IL2CPP 游戏目录。')
+      if (candidate && !await validGame(candidate)) throw new Error('请选择包含 Probably Stolen.exe 的游戏目录。')
       selectedPath = candidate || await findGamePath()
       return getExtensionRequiredMods()
     },
@@ -172,7 +212,7 @@ export default async function main(context: IExtensionContext): Promise<boolean>
   const supportedGame = (id: string | number) => String(id) === String(GAME_ID)
   for (const loader of ['melonloader', 'bepinex'] as const) {
     context.registerModType(modType(loader), 60, supportedGame, () => '{gamePath}',
-      () => false, { name: loader === 'melonloader' ? 'MelonLoader IL2CPP Runtime' : 'BepInEx 6 IL2CPP Runtime' })
+      () => false, { name: loader === 'melonloader' ? 'MelonLoader Runtime' : 'BepInEx Runtime' })
     context.registerInstaller(modType(loader), 60,
       (files, id) => ({ supported: supportedGame(id) && runtimeRoot(files, loader) !== undefined }),
       async files => {
@@ -181,7 +221,9 @@ export default async function main(context: IExtensionContext): Promise<boolean>
         const status = await getLoaderStatus()
         const other = loader === 'melonloader' ? 'bepinex' : 'melonloader'
         if (status[other].injectorPresent) throw new Error(`请先禁用或移除 ${other} 预载器，再安装 ${loader}。`)
-        return { instructions: runtimeInstructions(files, loader), modType: modType(loader) }
+        // A known game backend must match the runtime; IL2CPP and Mono loaders are not interchangeable.
+        const backend = status.backend || undefined
+        return { instructions: runtimeInstructions(files, loader, backend), modType: modType(loader) }
       })
   }
   context.registerModType(modType('mods'), 30, supportedGame, () => '{gamePath}',
