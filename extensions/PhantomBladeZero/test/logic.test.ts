@@ -56,18 +56,20 @@ import {
 } from '../src/installers'
 import { registerPhantomBladeZeroModTypes } from '../src/modTypes'
 import { applyMutableFilePolicies } from '../src/policy'
-import { getLocalModFeatures, getRequirementItems, getRequirementStatus } from '../src/requirements'
+import { getExtensionRequiredMods, getLocalModFeatures, getRequirementItems, getRequirementStatus } from '../src/requirements'
 
-function requirementContext(existingFiles: string[]) {
+function requirementContext(existingFiles: string[], existingDirectories: string[] = []) {
   const existing = new Set(existingFiles.map((file) => path.normalize(file).toLowerCase()))
+  const directories = new Set(existingDirectories.map((directory) => path.normalize(directory).toLowerCase()))
   return {
     api: {
       util: {
         path,
         fs: {
           stat: async (file: string) => {
-            if (!existing.has(path.normalize(file).toLowerCase())) throw new Error('ENOENT')
-            return { isFile: true }
+            const normalized = path.normalize(file).toLowerCase()
+            if (!existing.has(normalized) && !directories.has(normalized)) throw new Error('ENOENT')
+            return { isFile: existing.has(normalized), isDirectory: directories.has(normalized) }
           },
         },
       },
@@ -788,16 +790,30 @@ async function main() {
   assert.ok(modTypes.every((item) => Boolean(item.name)))
 
   // --- Requirements ---
-  assert.deepEqual(getRequirementItems().map((item) => item.name), ['UE4SS (Phantom Blade Zero build)'])
+  assert.deepEqual(getRequirementItems().map((item) => item.name), ['UE4SS (Phantom Blade Zero build)', 'PBZModLoader'])
   const requirement = getRequirementItems()[0]
   assert.equal(requirement.modId, '128413')
   assert.equal(requirement.mod_id, '128413')
   assert.equal(requirement.requirement, 'enabled')
   assert.equal(requirement.openModDetailDialog, false)
   assert.equal(requirement.modType, MOD_TYPE_UE4SS)
+  assert.deepEqual(getRequirementItems()[1], {
+    key: 'phantom-blade-zero-pbzmodloader',
+    name: 'PBZModLoader',
+    modId: '129441',
+    mod_id: '129441',
+    modType: MOD_TYPE_ROOT,
+    openModDetailDialog: false,
+    requirement: 'enabled',
+  })
   assert.deepEqual(getLocalModFeatures(), [
     {
       modId: 128413,
+      marked: true,
+      mark: { type: 'prerequisite', label: '前置模组' },
+    },
+    {
+      modId: 129441,
       marked: true,
       mark: { type: 'prerequisite', label: '前置模组' },
     },
@@ -807,12 +823,41 @@ async function main() {
   const xinputPath = path.join(gamePath, 'platform/steam', 'xinput1_4.dll')
   const dllPath = path.join(gamePath, 'platform/steam', 'ue4ss', 'UE4SS.dll')
   const flatDllPath = path.join(gamePath, 'platform/steam', 'UE4SS.dll')
-  assert.equal((await getRequirementStatus(requirementContext([dwmapiPath, dllPath]), gamePath)).installed, true)
-  assert.equal((await getRequirementStatus(requirementContext([xinputPath, dllPath]), gamePath)).installed, true)
-  assert.equal((await getRequirementStatus(requirementContext([dwmapiPath, flatDllPath]), gamePath)).installed, true)
+  const versionPath = path.join(gamePath, 'platform/steam', 'version.dll')
+  const loaderPath = path.join(gamePath, 'ProjectPBZ', 'PBZModLoader')
+  for (const ue4ssFiles of [[dwmapiPath, dllPath], [xinputPath, dllPath], [dwmapiPath, flatDllPath]]) {
+    assert.equal((await getRequirementStatus(requirementContext([...ue4ssFiles, versionPath], [loaderPath]), gamePath)).installed, true)
+  }
   assert.equal((await getRequirementStatus(requirementContext([dwmapiPath]), gamePath)).installed, false)
   assert.equal((await getRequirementStatus(requirementContext([dllPath]), gamePath)).installed, false)
-  assert.equal((await getRequirementStatus(requirementContext([]), gamePath)).requirements.length, 1)
+  // Check every partial installation, including both missing in one response.
+  for (const hasUe4ss of [false, true]) {
+    for (const hasVersion of [false, true]) {
+      for (const hasLoader of [false, true]) {
+        const files = [...(hasUe4ss ? [dwmapiPath, dllPath] : []), ...(hasVersion ? [versionPath] : [])]
+        const context = requirementContext(files, hasLoader ? [loaderPath] : [])
+        const expected = [...(hasUe4ss ? [] : ['128413']), ...(hasVersion && hasLoader ? [] : ['129441'])]
+        const result = await getExtensionRequiredMods(context, gamePath)
+        assert.deepEqual(result.requirements.map((item) => item.modId), expected)
+        assert.equal(result.installed, expected.length === 0)
+        if ('requirement' in result) {
+          assert.equal(result.code, 'EXTENSION_REQUIRED_MODS_MISSING')
+          assert.equal(result.requirement.code, result.code)
+          assert.deepEqual(result.requirement.requirements, result.requirements)
+        } else {
+          assert.equal(expected.length, 0)
+        }
+      }
+    }
+  }
+  // A file cannot stand in for the loader directory, nor a directory for the DLL.
+  for (const context of [
+    requirementContext([dwmapiPath, dllPath, versionPath, loaderPath]),
+    requirementContext([dwmapiPath, dllPath], [versionPath, loaderPath]),
+    requirementContext([dwmapiPath, dllPath, path.join(gamePath, 'version.dll')], [loaderPath]),
+  ]) {
+    assert.deepEqual((await getRequirementStatus(context, gamePath)).requirements.map((item) => item.modId), ['129441'])
+  }
 
   console.log('phantom blade zero extension tests passed')
 }

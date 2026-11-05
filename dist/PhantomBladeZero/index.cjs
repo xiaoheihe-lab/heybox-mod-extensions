@@ -17,7 +17,7 @@ var __copyProps = (to, from, except, desc) => {
 };
 var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
 
-// extensions/PhantomBladeZero/index.ts
+// index.ts
 var index_exports = {};
 __export(index_exports, {
   default: () => src_default,
@@ -52,7 +52,7 @@ __export(index_exports, {
 });
 module.exports = __toCommonJS(index_exports);
 
-// extensions/PhantomBladeZero/src/constants.ts
+// src/constants.ts
 var GAME_ID = 4115450;
 var GAME_NAME = "Phantom Blade Zero";
 var EXECUTABLE = "platform/steam/PBZ.exe";
@@ -72,6 +72,7 @@ var UE4SS_DWMAPI = "dwmapi.dll";
 var UE4SS_SETTINGS = "UE4SS-settings.ini";
 var UE4SS_PROXY_DLLS = [UE4SS_DWMAPI, "xinput1_3.dll", "xinput1_4.dll"];
 var UE4SS_REQUIREMENT_MOD_ID = "128413";
+var PBZ_MODLOADER_REQUIREMENT_MOD_ID = "129441";
 var MODS_FILE = "mods.txt";
 var MODS_FILE_BACKUP = "mods.txt.original";
 var ENABLED_FILE = "enabled.txt";
@@ -126,7 +127,7 @@ var INSTALLER_PRIORITY = {
   root: 40
 };
 
-// extensions/PhantomBladeZero/src/paths.ts
+// src/paths.ts
 var path = require("path");
 function normalizeArchivePath(filePath) {
   return String(filePath || "").replace(/\\/g, "/").replace(/^\/+/, "");
@@ -183,7 +184,7 @@ function getStagingSourcePath(file, stagingPath, sourcePathByFile) {
   return path.join(String(stagingPath || ""), file);
 }
 
-// extensions/PhantomBladeZero/src/installers.ts
+// src/installers.ts
 var PATCH_EXTENSIONS = [".pak", ".ucas", ".utoc", ".sig"];
 var FOMOD_CONFIG = /(^|\/)fomod\/moduleconfig\.xml$/i;
 var CONTENT_MARKERS = new Set(CONTENT_ROOT_DIRECTORIES.map((directory) => directory.toLowerCase()));
@@ -955,7 +956,7 @@ function installRoot(files) {
   return { instructions, modType: MOD_TYPE_ROOT };
 }
 
-// extensions/PhantomBladeZero/src/policy.ts
+// src/policy.ts
 var MUTABLE_UE4SS_FILES = /* @__PURE__ */ new Set([
   `${BINARIES_PATH}/ue4ss/${UE4SS_SETTINGS}`.toLowerCase(),
   `${BINARIES_PATH}/ue4ss/Mods/${MODS_FILE_BACKUP}`.toLowerCase()
@@ -974,7 +975,7 @@ function applyMutableFilePolicies(result) {
   };
 }
 
-// extensions/PhantomBladeZero/src/modTypes.ts
+// src/modTypes.ts
 function isPhantomBladeZero(gameId) {
   return Number(gameId) === GAME_ID;
 }
@@ -1105,11 +1106,11 @@ function registerPhantomBladeZeroModTypes(context) {
   );
 }
 
-// extensions/PhantomBladeZero/src/requirements.ts
-async function fileExists(context, filePath) {
+// src/requirements.ts
+async function pathExists(context, filePath, kind = "isFile") {
   try {
     const stat = await context.api.util.fs.stat(filePath);
-    return Boolean(stat?.isFile);
+    return Boolean(stat?.[kind]);
   } catch {
     return false;
   }
@@ -1128,17 +1129,24 @@ function getRequirementItems() {
       modType: MOD_TYPE_UE4SS,
       openModDetailDialog: false,
       requirement: "enabled"
+    },
+    {
+      key: "phantom-blade-zero-pbzmodloader",
+      name: "PBZModLoader",
+      modId: PBZ_MODLOADER_REQUIREMENT_MOD_ID,
+      mod_id: PBZ_MODLOADER_REQUIREMENT_MOD_ID,
+      modType: MOD_TYPE_ROOT,
+      openModDetailDialog: false,
+      requirement: "enabled"
     }
   ];
 }
 function getLocalModFeatures() {
-  return [
-    {
-      modId: Number(UE4SS_REQUIREMENT_MOD_ID),
-      marked: true,
-      mark: { type: "prerequisite", label: "\u524D\u7F6E\u6A21\u7EC4" }
-    }
-  ];
+  return getRequirementItems().map((item) => ({
+    modId: Number(item.modId),
+    marked: true,
+    mark: { type: "prerequisite", label: "\u524D\u7F6E\u6A21\u7EC4" }
+  }));
 }
 function getUe4ssPaths(context, gamePath) {
   const join = context.api.util.path.join;
@@ -1168,9 +1176,15 @@ async function ensureSetupDirectories(context, gamePath) {
 async function getRequirementStatus(context, gamePath) {
   const resolvedGamePath = String(gamePath || await findGamePath(context) || "");
   const paths = getUe4ssPaths(context, resolvedGamePath);
-  const hasProxy = (await Promise.all(paths.proxies.map((file) => fileExists(context, file)))).some(Boolean);
-  const hasRuntime = (await Promise.all(paths.runtime.map((file) => fileExists(context, file)))).some(Boolean);
-  const requirements = hasProxy && hasRuntime ? [] : getRequirementItems();
+  const join = context.api.util.path.join;
+  const [proxies, runtimes, hasLoaderProxy, hasLoaderDirectory] = await Promise.all([
+    Promise.all(paths.proxies.map((file) => pathExists(context, file))),
+    Promise.all(paths.runtime.map((file) => pathExists(context, file))),
+    resolvedGamePath ? pathExists(context, join(paths.binaries, "version.dll")) : false,
+    resolvedGamePath ? pathExists(context, join(resolvedGamePath, ...PBZ_MODLOADER_PATH.split("/")), "isDirectory") : false
+  ]);
+  const ready = [proxies.some(Boolean) && runtimes.some(Boolean), hasLoaderProxy && hasLoaderDirectory];
+  const requirements = getRequirementItems().filter((_, index) => !ready[index]);
   return {
     installed: requirements.length === 0,
     gamePath: resolvedGamePath,
@@ -1195,7 +1209,7 @@ async function setupExtension(context, gamePath) {
   return getExtensionRequiredMods(context, resolved);
 }
 
-// extensions/PhantomBladeZero/src/index.ts
+// src/index.ts
 async function main(context) {
   context.registerGame({
     id: GAME_ID,
