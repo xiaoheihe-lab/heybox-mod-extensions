@@ -4,7 +4,10 @@ import {
   GAME_ID,
   LOGIC_MODS_PATH,
   MOD_TYPE_UE4SS,
+  MOD_TYPE_ROOT,
   PAK_MODS_PATH,
+  PBZ_MODLOADER_PATH,
+  PBZ_MODLOADER_REQUIREMENT_MOD_ID,
   UE4SS_DLL,
   UE4SS_MODS_PATH,
   UE4SS_PROXY_DLLS,
@@ -19,10 +22,14 @@ export interface RequirementStatus {
   requirements: Array<Record<string, unknown>>
 }
 
-async function fileExists(context: IExtensionContext, filePath: string): Promise<boolean> {
+async function pathExists(
+  context: IExtensionContext,
+  filePath: string,
+  kind: 'isFile' | 'isDirectory' = 'isFile',
+): Promise<boolean> {
   try {
     const stat = await context.api.util.fs.stat(filePath)
-    return Boolean(stat?.isFile)
+    return Boolean(stat?.[kind])
   } catch {
     return false
   }
@@ -34,8 +41,7 @@ export async function findGamePath(context: IExtensionContext): Promise<string |
 }
 
 /**
- * The UE4SS build for Phantom Blade Zero ships as a regular Heybox mod
- * (mod id 128413) because the game's custom engine needs a patched runtime.
+ * Both loaders ship as regular Heybox mods and share one prerequisite flow.
  */
 export function getRequirementItems() {
   return [
@@ -48,18 +54,25 @@ export function getRequirementItems() {
       openModDetailDialog: false,
       requirement: 'enabled',
     },
+    {
+      key: 'phantom-blade-zero-pbzmodloader',
+      name: 'PBZModLoader',
+      modId: PBZ_MODLOADER_REQUIREMENT_MOD_ID,
+      mod_id: PBZ_MODLOADER_REQUIREMENT_MOD_ID,
+      modType: MOD_TYPE_ROOT,
+      openModDetailDialog: false,
+      requirement: 'enabled',
+    },
   ]
 }
 
 /** Local mod list marker so the prerequisite is visible before it is installed. */
 export function getLocalModFeatures(): LocalModFeature[] {
-  return [
-    {
-      modId: Number(UE4SS_REQUIREMENT_MOD_ID),
-      marked: true,
-      mark: { type: 'prerequisite', label: '前置模组' },
-    },
-  ]
+  return getRequirementItems().map<LocalModFeature>((item) => ({
+    modId: Number(item.modId),
+    marked: true,
+    mark: { type: 'prerequisite', label: '前置模组' },
+  }))
 }
 
 /**
@@ -112,9 +125,20 @@ export async function getRequirementStatus(
 ): Promise<RequirementStatus> {
   const resolvedGamePath = String(gamePath || await findGamePath(context) || '')
   const paths = getUe4ssPaths(context, resolvedGamePath)
-  const hasProxy = (await Promise.all(paths.proxies.map((file) => fileExists(context, file)))).some(Boolean)
-  const hasRuntime = (await Promise.all(paths.runtime.map((file) => fileExists(context, file)))).some(Boolean)
-  const requirements = hasProxy && hasRuntime ? [] : getRequirementItems()
+  const join = context.api.util.path.join
+  // Collect every missing loader before returning a single prerequisite request.
+  const [proxies, runtimes, hasLoaderProxy, hasLoaderDirectory] = await Promise.all([
+    Promise.all(paths.proxies.map((file) => pathExists(context, file))),
+    Promise.all(paths.runtime.map((file) => pathExists(context, file))),
+    resolvedGamePath
+      ? pathExists(context, join(paths.binaries, 'version.dll'))
+      : false,
+    resolvedGamePath
+      ? pathExists(context, join(resolvedGamePath, ...PBZ_MODLOADER_PATH.split('/')), 'isDirectory')
+      : false,
+  ])
+  const ready = [proxies.some(Boolean) && runtimes.some(Boolean), hasLoaderProxy && hasLoaderDirectory]
+  const requirements = getRequirementItems().filter((_, index) => !ready[index])
 
   return {
     installed: requirements.length === 0,

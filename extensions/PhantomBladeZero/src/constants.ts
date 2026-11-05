@@ -30,6 +30,7 @@ export const UE4SS_SETTINGS = 'UE4SS-settings.ini'
 export const UE4SS_PROXY_DLLS = [UE4SS_DWMAPI, 'xinput1_3.dll', 'xinput1_4.dll']
 // Heybox mod entry for the Phantom Blade Zero UE4SS build.
 export const UE4SS_REQUIREMENT_MOD_ID = '128413'
+export const PBZ_MODLOADER_REQUIREMENT_MOD_ID = '129441'
 export const MODS_FILE = 'mods.txt'
 // The packaged list is stored beside the live one instead of replacing it, so a
 // player's existing CheatManager/console entries survive a UE4SS install.
