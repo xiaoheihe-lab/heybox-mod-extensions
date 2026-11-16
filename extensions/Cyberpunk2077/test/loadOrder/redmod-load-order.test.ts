@@ -3,12 +3,13 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
-import { atomicWrite, buildRedmodDeployArgs, serializeAndDeployRedmods } from '../../src/loadOrder/deployer'
+import { atomicWrite, buildRedmodDeployArgs, serializeAndDeployRedmods, redmodNeedsRebuild, redmodFailureReason } from '../../src/loadOrder/deployer'
 import {
   createRedmodEntryId,
   deserializeRedmodLoadOrder,
   getEnabledRedmodNames,
   isRedmodLoadOrderModRelevant,
+  validateRedmodLoadOrder,
 } from '../../src/loadOrder/provider'
 import { extractRedmodAttributes } from '../../src/redmod/attributes'
 import { extractFomodRedmodAttributes } from '../../src/redmod/fomodAttributes'
@@ -78,12 +79,21 @@ test('REDmod modlist keeps UI order, filters disabled entries, and uses semantic
   assert.deepEqual(getEnabledRedmodNames(ordered), ['Middle'])
   assert.deepEqual(buildRedmodDeployArgs('D:/Games/Cyberpunk 2077', 'D:/Games/Cyberpunk 2077/H2077/modlist.txt'), [
     'deploy',
-    '-force',
-    '-root=D:/Games/Cyberpunk 2077',
-    `-rttiSchemaFile=${path.join('D:/Games/Cyberpunk 2077', 'tools/redmod/metadata.json')}`,
+    '-reportProgress',
+    '-root',
+    'D:/Games/Cyberpunk 2077',
+    `-rttiSchemaPath=${path.join('D:/Games/Cyberpunk 2077', 'tools/redmod/metadata.json')}`,
     '-modlist=D:/Games/Cyberpunk 2077/H2077/modlist.txt',
   ])
   assert.equal(getEnabledRedmodNames([]).join('\r\n'), '')
+})
+
+test('REDmod validation rejects duplicate game folder names before deployment', () => {
+  const entries = deserializeRedmodLoadOrder(context())
+  assert.throws(
+    () => validateRedmodLoadOrder(entries, [{ ...entries[0], data: { ...entries[0].data, relativePath: 'mods/middle' } }, entries[1]]),
+    /Duplicate REDmod name/,
+  )
 })
 
 test('REDmod deployment writes enabled-only CRLF modlist and diagnostics before running the CLI', async () => {
@@ -91,6 +101,8 @@ test('REDmod deployment writes enabled-only CRLF modlist and diagnostics before 
   const writes: Array<{ path: string, data: string }> = []
   const runs: Array<{ executable: string, gamePath: string, modlistPath: string }> = []
   await serializeAndDeployRedmods(entries, context(), {
+    readModlist: async () => ['Middle'],
+    resetCache: async () => { throw new Error('unchanged order must not clear cache') },
     fileExists: async () => true,
     atomicWrite: async (filePath, data) => { writes.push({ path: filePath, data }) },
     runRedmod: async (executable, gamePath, modlistPath) => { runs.push({ executable, gamePath, modlistPath }) },
@@ -106,6 +118,8 @@ test('REDmod deployment still writes an empty modlist before reporting missing D
   const writes: string[] = []
   await assert.rejects(
     serializeAndDeployRedmods([], context(), {
+      readModlist: async () => [],
+      resetCache: async () => { throw new Error('missing DLC must not clear cache') },
       fileExists: async () => false,
       atomicWrite: async (_filePath, data) => { writes.push(data) },
       runRedmod: async () => { throw new Error('must not run') },
@@ -178,6 +192,7 @@ test('FOMOD post-installer projection emits only selected REDmods and clears an 
   assert.deepEqual(await extractFomodRedmodAttributes(empty.context, fomodSelection([])), {
     cyberpunkRedmodInfo: [],
     cyberpunkRedmodRequiresDeploy: false,
+    cyberpunkRedmodEmptySoundDirs: [],
   })
 
   const selected = fakeContext({
@@ -224,6 +239,21 @@ test('FOMOD post-installer projection rejects selected malformed REDmods', async
   )
 })
 
+test('FOMOD projects SDK-resolved absolute targets only inside the known game root', async () => {
+  const fixture = fakeContext({ 'D:/staging/choice/info.json': JSON.stringify({ name: 'Example', version: '' }) })
+  const selection = {
+    ...fomodSelection([
+      { type: 'copy', source: 'choice/info.json', destination: 'D:/Games/CP2077/mods/Example/info.json' },
+      { type: 'copy', source: 'choice/content.archive', destination: 'D:/Games/CP2077/mods/Example/archives/content.archive' },
+    ]),
+    gamePath: 'D:\\Games\\CP2077', mod: { version: '3.0' },
+  }
+  const attributes = await extractFomodRedmodAttributes(fixture.context, selection)
+  assert.deepEqual(attributes.cyberpunkRedmodInfo, [{ name: 'Example', version: '3.0', relativePath: 'mods/Example' }])
+  await assert.rejects(extractFomodRedmodAttributes(fixture.context, { ...selection, gamePath: 'D:/Games/Other' }),
+    (error: any) => error.code === 'FOMOD_INVALID_CONFIG')
+})
+
 test('REDmod load order relevance accepts selected FOMOD metadata and rejects empty metadata', () => {
   const base = { modKey: '9_9', modType: MOD_TYPE.fomod, enabled: false, metaInfo: {} }
   assert.equal(isRedmodLoadOrderModRelevant(base), false)
@@ -231,4 +261,28 @@ test('REDmod load order relevance accepts selected FOMOD metadata and rejects em
     ...base,
     metaInfo: { cyberpunkRedmodInfo: [{ name: 'Example', version: '1.0', relativePath: 'mods/Example' }] },
   }), true)
+})
+
+
+test('REDmod incrementally handles set changes, but purges only cache on reorder or unknown prior state', async () => {
+  assert.equal(redmodNeedsRebuild(['A', 'B'], ['A', 'B']), false)
+  assert.equal(redmodNeedsRebuild(['A'], ['A', 'B']), false)
+  assert.equal(redmodNeedsRebuild(['A', 'B'], ['B']), false)
+  assert.equal(redmodNeedsRebuild(['A', 'B'], ['B', 'A']), true)
+  assert.equal(redmodNeedsRebuild(undefined, ['A']), true)
+  const calls: string[] = []
+  await serializeAndDeployRedmods(deserializeRedmodLoadOrder(context()), context(), {
+    fileExists: async () => true,
+    readModlist: async () => undefined,
+    atomicWrite: async () => { calls.push('write') },
+    resetCache: async () => { calls.push('reset') },
+    runRedmod: async () => { calls.push('run') },
+  })
+  assert.deepEqual(calls, ['write', 'write', 'reset', 'run'])
+})
+
+test('REDmod diagnostics recover failure reason and interrupted exit codes', () => {
+  assert.equal(redmodFailureReason(1, '[DEPLOY] scripts\nSyntax error on line 42\n\nCommandlet deploy has failed.'), 'Syntax error on line 42')
+  assert.equal(redmodFailureReason(1, '[DEPLOY] compile\nCommandlet deploy has failed.'), 'REDmod exited with code 1')
+  assert.equal(redmodFailureReason(-1073741510, ''), 'REDmod was interrupted')
 })

@@ -2,7 +2,12 @@ import type { IExtensionContext, PostInstallerAttributeContext } from 'heybox-mo
 import { MOD_TYPE } from '../constants'
 import { normalizeRelativePath, sanitizePackageName } from '../package'
 import type { PackageFile, PreparedPackage } from '../types'
-import { findRedmodRoots, metadataFromRoots, validateRedmodRoot } from './metadata'
+import { findRedmodRoots, metadataFromRoots, validateRedmodRoot, emptySoundDirectories } from './metadata'
+
+type InstallerContext = PostInstallerAttributeContext & {
+  gamePath?: string
+  mod?: { version?: string }
+}
 
 function invalidFomodRedmod(message: string, cause?: unknown): Error {
   const error = new Error(message) as Error & { code?: string; cause?: unknown }
@@ -11,9 +16,11 @@ function invalidFomodRedmod(message: string, cause?: unknown): Error {
   return error
 }
 
-function normalizeDeploymentPath(value: unknown): string {
-  const raw = String(value ?? '').replace(/\\/g, '/')
-  if (!raw || raw.startsWith('/') || raw.startsWith('//') || /^[A-Za-z]:/.test(raw)) {
+function normalizeDeploymentPath(value: unknown, gamePath?: string): string {
+  let raw = String(value ?? '').replace(/\\/g, '/')
+  const gameRoot = String(gamePath || '').replace(/\\/g, '/').replace(/\/+$/, '')
+  if (gameRoot && raw.toLowerCase().startsWith(`${gameRoot.toLowerCase()}/`)) raw = raw.slice(gameRoot.length + 1)
+  if (!raw || raw.startsWith('/') || /^[A-Za-z]:/.test(raw)) {
     throw invalidFomodRedmod(`FOMOD REDmod target path must be relative to the game directory: ${raw}`)
   }
   try {
@@ -23,11 +30,11 @@ function normalizeDeploymentPath(value: unknown): string {
   }
 }
 
-function projectSelectedCopies(context: PostInstallerAttributeContext): PreparedPackage {
+function projectSelectedCopies(context: InstallerContext): PreparedPackage {
   const copiesByDestination = new Map<string, PackageFile>()
   for (const instruction of context.instructions) {
     if (instruction.type !== 'copy') continue
-    const destination = normalizeDeploymentPath(instruction.destination)
+    const destination = normalizeDeploymentPath(instruction.destination, context.gamePath)
     const source = normalizeRelativePath(instruction.source)
     const key = destination.toLowerCase()
     // Map iteration order is not important to REDmod validation, but delete/set
@@ -40,12 +47,13 @@ function projectSelectedCopies(context: PostInstallerAttributeContext): Prepared
   return {
     files,
     packageName: sanitizePackageName(firstRoot || 'FomodRedmod'),
+    packageVersion: context.mod?.version,
   }
 }
 
 export async function extractFomodRedmodAttributes(
   contextValue: IExtensionContext,
-  context: PostInstallerAttributeContext,
+  context: InstallerContext,
 ): Promise<Record<string, unknown>> {
   if (context.modTypeId !== MOD_TYPE.fomod && context.installerTypeId !== MOD_TYPE.fomod) return {}
 
@@ -55,6 +63,7 @@ export async function extractFomodRedmodAttributes(
     return {
       cyberpunkRedmodInfo: [],
       cyberpunkRedmodRequiresDeploy: false,
+      cyberpunkRedmodEmptySoundDirs: [],
     }
   }
 
@@ -74,6 +83,7 @@ export async function extractFomodRedmodAttributes(
     return {
       cyberpunkRedmodInfo: metadataFromRoots(roots),
       cyberpunkRedmodRequiresDeploy: roots.length > 0,
+      cyberpunkRedmodEmptySoundDirs: emptySoundDirectories(roots),
     }
   } catch (error) {
     if ((error as any)?.code === 'FOMOD_INVALID_CONFIG') throw error

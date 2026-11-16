@@ -18,89 +18,10 @@ const REDSCRIPT_DEPRECATED = [
 const RED4EXT_BASE = ['red4ext/license.txt', 'red4ext/red4ext.dll']
 const RED4EXT_CURRENT_EXTRA = 'red4ext/third_party_licenses.txt'
 
-const INPUT_LOADER_CURRENT = [
-  'engine/config/platform/pc/input_loader.ini',
-  'r6/cache/inputcontexts.xml',
-  'r6/cache/inputusermappings.xml',
-  'red4ext/plugins/input_loader/input_loader.dll',
-  'red4ext/plugins/input_loader/inputusermappings.xml',
-  'red4ext/plugins/input_loader/license.md',
-  'red4ext/plugins/input_loader/readme.md',
-]
-const INPUT_LOADER_011 = [
-  'red4ext/plugins/input_loader/input_loader.dll',
-  'red4ext/plugins/input_loader/inputusermappings.xml',
-  'red4ext/plugins/input_loader/license.md',
-  'red4ext/plugins/input_loader/readme.md',
-  'red4ext/plugins/input_loader_uninstall.bat',
-]
-const INPUT_LOADER_010 = [
-  'red4ext/plugins/input_loader/input_loader.dll',
-  'red4ext/plugins/input_loader/inputusermappings.xml',
-]
-
-const MOD_SETTINGS = [
-  'red4ext/plugins/mod_settings/modsettings.archive',
-  'red4ext/plugins/mod_settings/modsettings.archive.xl',
-  'red4ext/plugins/mod_settings/mod_settings.dll',
-  'red4ext/plugins/mod_settings/module.reds',
-  'red4ext/plugins/mod_settings/packed.reds',
-  'red4ext/plugins/mod_settings/license.md',
-  'red4ext/plugins/mod_settings/readme.md',
-]
-
-const TWEAK_XL = [
-  'red4ext/plugins/tweakxl/tweakxl.dll',
-  'red4ext/plugins/tweakxl/scripts/tweakxl.global.reds',
-  'red4ext/plugins/tweakxl/scripts/tweakxl.reds',
-  'red4ext/plugins/tweakxl/data/extraflats.dat',
-  'red4ext/plugins/tweakxl/data/inheritancemap.dat',
-  'red4ext/plugins/tweakxl/license',
-  'red4ext/plugins/tweakxl/third_party_licenses',
-]
-
-const AUDIOWARE = [
-  'red4ext/plugins/audioware/audioware.dll',
-  ...['Codeware', 'Config', 'Ext', 'Hooks', 'Natives', 'Preset', 'Service', 'Settings', 'System', 'Tween', 'Utils']
-    .map((name) => `r6/scripts/audioware/${name.toLowerCase()}.reds`),
-]
-
-const ARCHIVE_XL = [
-  'r6/config/redsuserhints/archivexl.toml',
-  'red4ext/plugins/archivexl/archivexl.dll',
-  'red4ext/plugins/archivexl/bundle/archivexl.archive',
-  'red4ext/plugins/archivexl/bundle/photomodescope.xl',
-  'red4ext/plugins/archivexl/bundle/playerbasescope.xl',
-  'red4ext/plugins/archivexl/bundle/playercustomizationbeardfix.xl',
-  'red4ext/plugins/archivexl/bundle/playercustomizationbeardscope.xl',
-  'red4ext/plugins/archivexl/bundle/playercustomizationbrowsfix.xl',
-  'red4ext/plugins/archivexl/bundle/playercustomizationbrowspatch.xl',
-  'red4ext/plugins/archivexl/bundle/playercustomizationbrowsscope.xl',
-  'red4ext/plugins/archivexl/bundle/playercustomizationhairfix.xl',
-  'red4ext/plugins/archivexl/bundle/playercustomizationhairpatch.xl',
-  'red4ext/plugins/archivexl/bundle/playercustomizationhairscope.xl',
-  'red4ext/plugins/archivexl/bundle/playercustomizationlashesfix.xl',
-  'red4ext/plugins/archivexl/bundle/playercustomizationlashespatch.xl',
-  'red4ext/plugins/archivexl/bundle/playercustomizationlashesscope.xl',
-  'red4ext/plugins/archivexl/bundle/playercustomizationscope.xl',
-  'red4ext/plugins/archivexl/bundle/questbasescope.xl',
-  'red4ext/plugins/archivexl/license',
-  'red4ext/plugins/archivexl/scripts/archivexl.global.reds',
-  'red4ext/plugins/archivexl/scripts/archivexl.reds',
-  'red4ext/plugins/archivexl/third_party_licenses',
-]
-
 const CYBERCAT_EXECUTABLE = 'cp2077saveeditor.exe'
 const CYBERCAT = [
   CYBERCAT_EXECUTABLE, 'd3dcompiler_47_cor3.dll', 'e_sqlite3.dll', 'kraken.dll',
   'penimc_cor3.dll', 'presentationnative_cor3.dll', 'vcruntime140_cor3.dll', 'wpfgfx_cor3.dll',
-]
-
-const AMM_CORE = [
-  `${PATHS.amm}/init.lua`,
-  `${PATHS.amm}/db.sqlite3`,
-  `${PATHS.amm}/collabs/api.lua`,
-  `${PATHS.archive}/basegame_amm_props.archive`,
 ]
 
 const CYBERSCRIPT = [
@@ -130,6 +51,14 @@ function strictCandidate(
       if (!hasAllPaths(input.pkg.files, required)) missing(id)
       return success(input, modTypeId)
     },
+  }
+}
+
+function markerCandidate(id: string, modTypeId: CyberpunkInstallResult['modTypeId'], marker: string): Candidate {
+  return {
+    id, modTypeId,
+    matches: ({ pkg }) => hasPath(pkg.files, marker),
+    install: (input) => success(input, modTypeId),
   }
 }
 
@@ -185,28 +114,6 @@ const blockedWolvenKit: Candidate = {
   install: () => { throw new Error('WolvenKit CLI/Desktop 不能作为游戏 Mod 安装。') },
 }
 
-const coreInputLoader: Candidate = {
-  id: 'Core Input Loader',
-  modTypeId: MOD_TYPE.coreInputLoader,
-  matches: ({ pkg }) => hasPath(pkg.files, 'red4ext/plugins/input_loader/input_loader.dll'),
-  install: async (input) => {
-    if (hasAllPaths(input.pkg.files, INPUT_LOADER_CURRENT)) return success(input, MOD_TYPE.coreInputLoader)
-    const is011 = hasAllPaths(input.pkg.files, INPUT_LOADER_011)
-    const is010 = hasAllPaths(input.pkg.files, INPUT_LOADER_010)
-    if (!is011 && !is010) missing('Input Loader')
-    await confirmInstall(input.context, '旧版 Input Loader', '该压缩包使用旧版 Input Loader 布局，将补充 input_loader.ini。')
-    const instructions = copySame(input.pkg.files)
-    if (!hasPath(input.pkg.files, 'engine/config/platform/pc/input_loader.ini')) {
-      instructions.unshift({
-        type: 'generatefile',
-        data: '[Player/Input]\n',
-        destination: 'engine/config/platform/pc/input_loader.ini',
-      })
-    }
-    return { modTypeId: MOD_TYPE.coreInputLoader, instructions }
-  },
-}
-
 const coreCyberCat: Candidate = {
   id: 'Core CyberCAT',
   modTypeId: MOD_TYPE.coreCyberCat,
@@ -227,12 +134,12 @@ export const CORE_CANDIDATES: Candidate[] = [
   coreRed4ext,
   blockedCsvMerge,
   blockedWolvenKit,
-  strictCandidate('Core Audioware', MOD_TYPE.coreAudioware, AUDIOWARE[0], AUDIOWARE),
-  strictCandidate('Core TweakXL', MOD_TYPE.coreTweakXL, TWEAK_XL[0], TWEAK_XL),
-  strictCandidate('Core ArchiveXL', MOD_TYPE.coreArchiveXL, ARCHIVE_XL[1], ARCHIVE_XL),
-  coreInputLoader,
-  strictCandidate('Core Mod Settings', MOD_TYPE.coreModSettings, MOD_SETTINGS[2], MOD_SETTINGS),
+  markerCandidate('Core Audioware', MOD_TYPE.coreAudioware, 'red4ext/plugins/audioware/audioware.dll'),
+  markerCandidate('Core TweakXL', MOD_TYPE.coreTweakXL, 'red4ext/plugins/tweakxl/tweakxl.dll'),
+  markerCandidate('Core ArchiveXL', MOD_TYPE.coreArchiveXL, 'red4ext/plugins/archivexl/archivexl.dll'),
+  markerCandidate('Core Input Loader', MOD_TYPE.coreInputLoader, 'red4ext/plugins/input_loader/input_loader.dll'),
+  markerCandidate('Core Mod Settings', MOD_TYPE.coreModSettings, 'red4ext/plugins/mod_settings/mod_settings.dll'),
   coreCyberCat,
-  strictCandidate('Core Appearance Menu Mod', MOD_TYPE.coreAmm, AMM_CORE[0], AMM_CORE),
+  markerCandidate('Core Appearance Menu Mod', MOD_TYPE.coreAmm, `${PATHS.amm}/init.lua`),
   strictCandidate('Core CyberScript', MOD_TYPE.coreCyberScript, CYBERSCRIPT[0], CYBERSCRIPT),
 ]

@@ -32,7 +32,7 @@ function getRedmodMetadata(context: LoadOrderContext): LoadOrderEntry[] {
       const name = String(raw.name || '').trim()
       const version = String(raw.version || '').trim()
       const relativePath = normalizeRelativePath(raw.relativePath)
-      if (!name || !version || !/^mods\/[^/]+$/i.test(relativePath)) continue
+      if (!name || typeof raw.version !== 'string' || !/^mods\/[^/]+$/i.test(relativePath)) continue
       const id = createRedmodEntryId(mod.modKey, relativePath)
       if (seen.has(id)) continue
       seen.add(id)
@@ -69,4 +69,23 @@ export function getEnabledRedmodNames(entries: LoadOrderEntry[]): string[] {
     .filter((entry) => entry.enabled)
     .map((entry) => path.basename(String((entry.data as unknown as RedmodLoadOrderData | undefined)?.relativePath || '')))
     .filter(Boolean)
+}
+
+/**
+ * Keep the adapter side of the shared SDK contract strict. The Web UI only
+ * returns ordered ids; the game adapter still owns the domain validation
+ * before it writes modlist.txt.
+ */
+export function validateRedmodLoadOrder(_previous: LoadOrderEntry[], current: LoadOrderEntry[]): void {
+  const seen = new Set<string>()
+  for (const entry of current) {
+    const data = (entry.data || {}) as Partial<RedmodLoadOrderData>
+    const relativePath = normalizeRelativePath(data.relativePath)
+    if (!/^mods\/[^/]+$/i.test(relativePath)) {
+      throw new Error(`Invalid REDmod path: ${relativePath}`)
+    }
+    const modName = path.basename(relativePath).toLowerCase()
+    if (seen.has(modName)) throw new Error(`Duplicate REDmod name: ${path.basename(relativePath)}`)
+    seen.add(modName)
+  }
 }

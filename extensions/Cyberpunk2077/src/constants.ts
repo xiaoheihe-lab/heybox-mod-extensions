@@ -90,6 +90,7 @@ export const PATHS = {
   red4extPlugins: 'red4ext/plugins',
   redscript: 'r6/scripts',
   redscriptHints: 'r6/config/redsUserHints',
+  redscriptStorages: 'r6/storages',
   tweakXL: 'r6/tweaks',
   audioware: 'r6/audioware',
   xmlConfig: 'r6/config',

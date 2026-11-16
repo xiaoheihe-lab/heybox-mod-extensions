@@ -1,7 +1,7 @@
-import type { IExtensionContext } from 'heybox-mod-api'
+import type { IExtensionContext, DeploymentOptions } from 'heybox-mod-api'
 import { GAME_ID, MOD_TYPE } from '../constants'
 import { preparePackage } from '../package'
-import type { Candidate, CyberpunkInstallResult, InstallerInput } from '../types'
+import type { Candidate, CyberpunkInstallResult, InstallerInput, PackageIdentity } from '../types'
 import { ammCandidate } from './amm'
 import { CONFIG_CANDIDATES } from './config'
 import { CORE_CANDIDATES } from './core'
@@ -37,8 +37,9 @@ export async function installCyberpunkPackage(
   context: IExtensionContext,
   files: string[],
   stagingPath = '',
+  options?: DeploymentOptions & { mod?: PackageIdentity },
 ): Promise<CyberpunkInstallResult> {
-  const input: InstallerInput = { context, pkg: preparePackage(files), stagingPath }
+  const input: InstallerInput = { context, pkg: preparePackage(files, options?.mod), stagingPath }
   if (input.pkg.files.length === 0) throw new Error('Mod archive does not contain installable files.')
 
   for (const candidate of PIPELINE) {

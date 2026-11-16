@@ -35,6 +35,6 @@ export function registerCyberpunkModTypes(context: IExtensionContext): void {
     MOD_TYPE.pipeline,
     30,
     testCyberpunkPackage,
-    (files, stagingPath) => installCyberpunkPackage(context, files, stagingPath),
+    (files, stagingPath, options) => installCyberpunkPackage(context, files, stagingPath, options),
   )
 }

@@ -1,7 +1,7 @@
 import fs from 'fs'
 import path from 'path'
 import { preparePackage } from '../package'
-import { findRedmodRoots, metadataFromRoots, validateRedmodRoot } from './metadata'
+import { findRedmodRoots, metadataFromRoots, validateRedmodRoot, emptySoundDirectories } from './metadata'
 
 async function listFiles(root: string, current = ''): Promise<string[]> {
   const directory = path.join(root, current)
@@ -15,9 +15,12 @@ async function listFiles(root: string, current = ''): Promise<string[]> {
   return files
 }
 
-export async function extractRedmodAttributes(_modInfo: unknown, stagingPath: string): Promise<Record<string, unknown>> {
+export async function extractRedmodAttributes(modInfo: unknown, stagingPath: string): Promise<Record<string, unknown>> {
   try {
-    const pkg = preparePackage(await listFiles(stagingPath))
+    const info = modInfo as any
+    const pkg = preparePackage(await listFiles(stagingPath), {
+      version: String(info?.version || info?.metaInfo?.version || info?.metaInfo?.versionDesc || ''),
+    })
     // A FOMOD archive can contain multiple optional REDmods. The install-time
     // extractor cannot see the user's selected copy instructions, so treating
     // every embedded root as installed would create phantom load-order entries.
@@ -31,6 +34,7 @@ export async function extractRedmodAttributes(_modInfo: unknown, stagingPath: st
     return {
       cyberpunkRedmodInfo: metadataFromRoots(roots),
       cyberpunkRedmodRequiresDeploy: true,
+      cyberpunkRedmodEmptySoundDirs: emptySoundDirectories(roots),
     }
   } catch {
     return {}

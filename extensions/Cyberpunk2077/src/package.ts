@@ -1,5 +1,5 @@
 import { KNOWN_TOP_LEVEL_DIRS } from './constants'
-import type { PackageFile, PreparedPackage } from './types'
+import type { PackageFile, PreparedPackage, PackageIdentity } from './types'
 
 export function normalizeRelativePath(value: unknown): string {
   const normalized = String(value ?? '')
@@ -38,7 +38,7 @@ function commonWrapper(paths: string[]): string | undefined {
   return revealsKnownRoot ? first : undefined
 }
 
-export function preparePackage(inputFiles: string[]): PreparedPackage {
+export function preparePackage(inputFiles: string[], identity?: PackageIdentity): PreparedPackage {
   const normalized = inputFiles.map(normalizeRelativePath).filter(Boolean)
   const wrapper = commonWrapper(normalized)
   const files: PackageFile[] = normalized.map((source) => {
@@ -46,14 +46,15 @@ export function preparePackage(inputFiles: string[]): PreparedPackage {
     return { source, path, lower: path.toLowerCase() }
   })
 
-  const fallbackName = files.find((file) => file.path.includes('/'))?.path.split('/')[0]
-    || files[0]?.path.replace(/\.[^.]+$/, '')
+  const fallbackName = files.find((file) => file.path.includes('/') && !KNOWN_TOP_LEVEL_DIRS.has(file.lower.split('/')[0]))?.path.split('/')[0]
+    || files[0]?.path.split('/').pop()?.replace(/\.[^.]+$/, '')
     || 'Cyberpunk2077Mod'
 
   return {
     files,
     wrapper,
-    packageName: sanitizePackageName(wrapper || fallbackName),
+    packageName: sanitizePackageName(identity?.name || wrapper || identity?.modKey || fallbackName),
+    packageVersion: identity?.version || undefined,
   }
 }
 

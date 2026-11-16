@@ -1,4 +1,6 @@
 import type { IExtensionContext, SteamPrerequisiteRegistration } from 'heybox-mod-api'
+import { isRedmodLoadOrderModRelevant } from '../loadOrder/provider'
+import type { LoadOrderModSnapshot } from 'heybox-mod-api'
 
 import {
   GAME_ID,
@@ -44,10 +46,11 @@ export async function getRedmodStatus(context: IExtensionContext, gamePath?: str
 
 export function createRedmodSteamPrerequisite(
   context: IExtensionContext,
-): SteamPrerequisiteRegistration {
+): SteamPrerequisiteRegistration & { isRequired(context: { mods?: LoadOrderModSnapshot[] }): boolean } {
   return {
     id: 'cyberpunk-redmod',
     steamAppId: REDMOD_STEAM_APP_ID,
+    isRequired: ({ mods }) => (mods || []).some(isRedmodLoadOrderModRelevant),
     presentation: {
       title: '安装 REDmod',
       content: 'REDmod 是 Cyberpunk 2077 的免费官方 Mod 工具 DLC。请先在 Steam 中完成安装，然后返回此处重新检查。普通非 REDmod 模组仍可继续管理。',

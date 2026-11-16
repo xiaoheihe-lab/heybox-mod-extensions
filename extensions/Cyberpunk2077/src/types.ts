@@ -13,6 +13,14 @@ export interface PreparedPackage {
   files: PackageFile[]
   packageName: string
   wrapper?: string
+  packageVersion?: string
+}
+
+/** Optional newer SDK context; published API 1.17 callers remain supported. */
+export interface PackageIdentity {
+  modKey?: string
+  name?: string
+  version?: string
 }
 
 export interface CopyInstruction {
