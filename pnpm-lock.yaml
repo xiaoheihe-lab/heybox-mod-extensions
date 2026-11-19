@@ -50,6 +50,33 @@ importers:
         specifier: ^5.7.0
         version: 5.9.3
 
+  extensions/DarkSouls2:
+    devDependencies:
+      heybox-mod-api:
+        specifier: 1.17.0
+        version: 1.17.0
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
+
+  extensions/DarkSouls3:
+    devDependencies:
+      heybox-mod-api:
+        specifier: 1.17.0
+        version: 1.17.0
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
+
+  extensions/DarkSoulsRemastered:
+    devDependencies:
+      heybox-mod-api:
+        specifier: 1.17.0
+        version: 1.17.0
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
+
   extensions/DarkestDungeon:
     devDependencies:
       heybox-mod-api:
