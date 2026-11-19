@@ -130,6 +130,7 @@ var PATHS = {
   red4extPlugins: "red4ext/plugins",
   redscript: "r6/scripts",
   redscriptHints: "r6/config/redsUserHints",
+  redscriptStorages: "r6/storages",
   tweakXL: "r6/tweaks",
   audioware: "r6/audioware",
   xmlConfig: "r6/config",
@@ -193,7 +194,7 @@ function getRedmodMetadata(context) {
       const name = String(raw.name || "").trim();
       const version = String(raw.version || "").trim();
       const relativePath = normalizeRelativePath(raw.relativePath);
-      if (!name || !version || !/^mods\/[^/]+$/i.test(relativePath)) continue;
+      if (!name || typeof raw.version !== "string" || !/^mods\/[^/]+$/i.test(relativePath)) continue;
       const id = createRedmodEntryId(mod.modKey, relativePath);
       if (seen.has(id)) continue;
       seen.add(id);
@@ -225,6 +226,19 @@ function deserializeRedmodLoadOrder(context) {
 }
 function getEnabledRedmodNames(entries) {
   return entries.filter((entry) => entry.enabled).map((entry) => import_path.default.basename(String(entry.data?.relativePath || ""))).filter(Boolean);
+}
+function validateRedmodLoadOrder(_previous, current) {
+  const seen = /* @__PURE__ */ new Set();
+  for (const entry of current) {
+    const data = entry.data || {};
+    const relativePath = normalizeRelativePath(data.relativePath);
+    if (!/^mods\/[^/]+$/i.test(relativePath)) {
+      throw new Error(`Invalid REDmod path: ${relativePath}`);
+    }
+    const modName = import_path.default.basename(relativePath).toLowerCase();
+    if (seen.has(modName)) throw new Error(`Duplicate REDmod name: ${import_path.default.basename(relativePath)}`);
+    seen.add(modName);
+  }
 }
 
 // src/loadOrder/deployer.ts
@@ -266,30 +280,61 @@ async function atomicWrite(filePath, data) {
 function buildRedmodDeployArgs(gamePath, modlistPath) {
   return [
     "deploy",
-    "-force",
-    `-root=${gamePath}`,
-    `-rttiSchemaFile=${import_path2.default.join(gamePath, REDMOD_METADATA)}`,
+    "-reportProgress",
+    "-root",
+    gamePath,
+    `-rttiSchemaPath=${import_path2.default.join(gamePath, REDMOD_METADATA)}`,
     `-modlist=${modlistPath}`
   ];
 }
+function redmodFailureReason(exitCode, output) {
+  if (exitCode !== null && exitCode >>> 0 === 3221225786) return "REDmod was interrupted";
+  const lines = output.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  const failedAt = lines.indexOf("Commandlet deploy has failed.");
+  const reason = failedAt >= 0 ? lines[failedAt - 1] : void 0;
+  return reason && !reason.startsWith("[DEPLOY]") ? reason : `REDmod exited with code ${exitCode}`;
+}
+function redmodNeedsRebuild(previous, next) {
+  if (previous === void 0) return true;
+  return [...previous].sort().join("\n") === [...next].sort().join("\n") && previous.join("\n") !== next.join("\n");
+}
 function runRedmod(executable, gamePath, modlistPath) {
   return new Promise((resolve, reject) => {
-    (0, import_child_process.execFile)(
-      executable,
-      buildRedmodDeployArgs(gamePath, modlistPath),
-      { cwd: import_path2.default.dirname(executable), windowsHide: true },
-      (error, _stdout, stderr) => {
-        if (!error) return resolve();
-        const details = String(stderr || "").trim();
-        reject(new RedmodDeploymentError(
-          "REDMOD_DEPLOY_FAILED",
-          details ? `${error.message}: ${details}` : error.message
-        ));
-      }
-    );
+    const child = (0, import_child_process.spawn)(executable, buildRedmodDeployArgs(gamePath, modlistPath), {
+      cwd: import_path2.default.dirname(executable),
+      windowsHide: true,
+      shell: false
+    });
+    let output = "";
+    const collect = (chunk) => {
+      output = (output + chunk.toString()).slice(-131072);
+    };
+    child.stdout?.on("data", collect);
+    child.stderr?.on("data", collect);
+    child.on("error", (error) => reject(new RedmodDeploymentError("REDMOD_DEPLOY_FAILED", error.message)));
+    child.on("close", (code, signal) => {
+      if (code === 0) return resolve();
+      reject(new RedmodDeploymentError("REDMOD_DEPLOY_FAILED", signal ? `REDmod was interrupted (${signal})` : redmodFailureReason(code, output)));
+    });
   });
 }
-var defaultDependencies = { fileExists, atomicWrite, runRedmod };
+var defaultDependencies = {
+  fileExists,
+  atomicWrite,
+  runRedmod,
+  readModlist: async (filePath) => {
+    try {
+      return (await import_fs.default.promises.readFile(filePath, "utf8")).split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+    } catch {
+      return void 0;
+    }
+  },
+  resetCache: async (gamePath) => {
+    const cachePath = import_path2.default.join(gamePath, "r6/cache/modded");
+    await import_fs.default.promises.rm(cachePath, { recursive: true, force: true });
+    await import_fs.default.promises.mkdir(cachePath, { recursive: true });
+  }
+};
 async function serializeAndDeployRedmods(entries, context, dependencies = defaultDependencies) {
   const gamePath = String(context.gamePath || "");
   if (!gamePath) throw new RedmodDeploymentError("REDMOD_GAME_PATH_MISSING", "\u672A\u627E\u5230 Cyberpunk 2077 \u6E38\u620F\u76EE\u5F55\u3002");
@@ -297,6 +342,8 @@ async function serializeAndDeployRedmods(entries, context, dependencies = defaul
   const metadataPath = import_path2.default.join(gamePath, REDMOD_METADATA);
   const modlistPath = import_path2.default.join(gamePath, MODLIST_PATH);
   const loadOrderPath = import_path2.default.join(gamePath, LOAD_ORDER_PATH);
+  const previous = await dependencies.readModlist(modlistPath);
+  const enabledRedmods = getEnabledRedmodNames(entries);
   const diagnostic = {
     schemaVersion: 1,
     providerId: REDMOD_LOAD_ORDER_PROVIDER_ID,
@@ -304,7 +351,7 @@ async function serializeAndDeployRedmods(entries, context, dependencies = defaul
     generatedAt: (/* @__PURE__ */ new Date()).toISOString(),
     entries
   };
-  await dependencies.atomicWrite(modlistPath, getEnabledRedmodNames(entries).join("\r\n"));
+  await dependencies.atomicWrite(modlistPath, enabledRedmods.join("\r\n"));
   await dependencies.atomicWrite(loadOrderPath, `${JSON.stringify(diagnostic, null, 2)}
 `);
   if (!await dependencies.fileExists(executable) || !await dependencies.fileExists(metadataPath)) {
@@ -313,7 +360,7 @@ async function serializeAndDeployRedmods(entries, context, dependencies = defaul
       "Steam REDmod DLC \u672A\u5B89\u88C5\u6216\u4E0D\u5B8C\u6574\uFF1BLoad Order \u5DF2\u4FDD\u5B58\uFF0C\u4F46\u5C1A\u672A\u8FD0\u884C redMod.exe\u3002"
     );
   }
-  const enabledRedmods = getEnabledRedmodNames(entries);
+  if (redmodNeedsRebuild(previous, enabledRedmods)) await dependencies.resetCache(gamePath);
   console.log("[Cyberpunk2077][REDmod] Starting REDmod compilation", {
     enabledRedmods,
     executable,
@@ -364,18 +411,19 @@ function commonWrapper(paths) {
   const revealsKnownRoot = unwrapped.some((file) => KNOWN_TOP_LEVEL_DIRS.has(file.split("/")[0].toLowerCase()));
   return revealsKnownRoot ? first2 : void 0;
 }
-function preparePackage(inputFiles) {
+function preparePackage(inputFiles, identity) {
   const normalized = inputFiles.map(normalizeRelativePath2).filter(Boolean);
   const wrapper = commonWrapper(normalized);
   const files = normalized.map((source) => {
-    const path4 = wrapper ? source.slice(wrapper.length + 1) : source;
-    return { source, path: path4, lower: path4.toLowerCase() };
+    const path6 = wrapper ? source.slice(wrapper.length + 1) : source;
+    return { source, path: path6, lower: path6.toLowerCase() };
   });
-  const fallbackName = files.find((file) => file.path.includes("/"))?.path.split("/")[0] || files[0]?.path.replace(/\.[^.]+$/, "") || "Cyberpunk2077Mod";
+  const fallbackName = files.find((file) => file.path.includes("/") && !KNOWN_TOP_LEVEL_DIRS.has(file.lower.split("/")[0]))?.path.split("/")[0] || files[0]?.path.split("/").pop()?.replace(/\.[^.]+$/, "") || "Cyberpunk2077Mod";
   return {
     files,
     wrapper,
-    packageName: sanitizePackageName(wrapper || fallbackName)
+    packageName: sanitizePackageName(identity?.name || wrapper || identity?.modKey || fallbackName),
+    packageVersion: identity?.version || void 0
   };
 }
 function extname(filePath) {
@@ -403,7 +451,7 @@ function hasPath(files, expected) {
   return files.some((file) => file.lower === lower);
 }
 function hasAllPaths(files, expected) {
-  return expected.every((path4) => hasPath(files, path4));
+  return expected.every((path6) => hasPath(files, path6));
 }
 
 // src/redmod/metadata.ts
@@ -415,7 +463,18 @@ function hasRedmodInfo(files, canonicalOnly = false) {
     return file.lower === "info.json" || /^mods\/[^/]+\/info\.json$/i.test(file.path) || /^[^/]+\/info\.json$/i.test(file.path);
   });
 }
-async function decodeInfo(file, readText2) {
+var SOUND_TYPES = /* @__PURE__ */ new Set([
+  "mod_skip",
+  "mod_sfx_2d",
+  "mod_sfx_city",
+  "mod_sfx_low_occlusion",
+  "mod_sfx_occlusion",
+  "mod_sfx_radio",
+  "mod_sfx_room",
+  "mod_sfx_street",
+  "mod_sfx_ui"
+]);
+async function decodeInfo(file, readText2, version) {
   let value;
   try {
     value = JSON.parse(await readText2(file));
@@ -423,10 +482,14 @@ async function decodeInfo(file, readText2) {
     throw new Error(`REDmod info.json \u65E0\u6CD5\u89E3\u6790\uFF1A${file.path} (${String(error)})`);
   }
   const info = value;
-  if (!info || typeof info.name !== "string" || !info.name.trim() || typeof info.version !== "string" || !info.version.trim()) {
+  if (!info || typeof info.name !== "string" || !info.name.trim() || typeof info.version !== "string") {
     throw new Error(`REDmod info.json \u7F3A\u5C11\u6709\u6548\u7684 name/version\uFF1A${file.path}`);
   }
-  return info;
+  if (info.description !== void 0 && typeof info.description !== "string") throw new Error(`REDmod description \u65E0\u6548\uFF1A${file.path}`);
+  if (info.customSounds !== void 0 && (!Array.isArray(info.customSounds) || info.customSounds.some(
+    (sound) => !sound || typeof sound.name !== "string" || !SOUND_TYPES.has(sound.type) || sound.file !== void 0 && typeof sound.file !== "string" || sound.gain !== void 0 && (typeof sound.gain !== "number" || !Number.isFinite(sound.gain)) || sound.pitch !== void 0 && (typeof sound.pitch !== "number" || !Number.isFinite(sound.pitch))
+  ))) throw new Error(`REDmod customSounds \u58F0\u660E\u65E0\u6548\uFF1A${file.path}`);
+  return { ...info, version: info.version || version || "" };
 }
 async function findRedmodRoots(pkg, readText2, canonicalOnly = false) {
   const roots = [];
@@ -445,7 +508,7 @@ async function findRedmodRoots(pkg, readText2, canonicalOnly = false) {
       destinationRoot = `mods/${named[1]}`;
     }
     if (sourceRoot === null) continue;
-    const info = await decodeInfo(file, readText2);
+    const info = await decodeInfo(file, readText2, pkg.packageVersion);
     destinationRoot ||= `mods/${sanitizePackageName(info.name || pkg.packageName)}`;
     roots.push({ infoFile: file, sourceRoot, destinationRoot, info });
   }
@@ -480,8 +543,13 @@ function validateRedmodRoot(pkg, root) {
   if (invalid) throw new Error(`REDmod \u5305\u542B\u65E0\u6548\u76EE\u5F55\u6216\u6587\u4EF6\u7C7B\u578B\uFF1A${invalid.path}`);
   const rootFiles = scopedFiles.filter((file) => isValidRedmodFile(relativeFromRedmodRoot(file, root.sourceRoot) || ""));
   const payloadFiles = rootFiles.filter((file) => file.source !== root.infoFile.source);
+  const sounds = root.info.customSounds || [];
+  const requiresSoundFiles = sounds.some((sound) => sound.type !== "mod_skip");
+  const hasSoundFiles = payloadFiles.some((file) => (relativeFromRedmodRoot(file, root.sourceRoot) || "").toLowerCase().startsWith("customsounds/"));
+  if (requiresSoundFiles !== hasSoundFiles) {
+    throw new Error(`REDmod customSounds \u58F0\u660E\u4E0E\u97F3\u9891\u6587\u4EF6\u4E0D\u4E00\u81F4\uFF1A${root.infoFile.path}`);
+  }
   if (payloadFiles.length === 0) {
-    const sounds = Array.isArray(root.info.customSounds) ? root.info.customSounds : [];
     if (sounds.length === 0 || sounds.some((sound) => sound?.type !== "mod_skip")) {
       throw new Error(`REDmod \u53EA\u6709 info.json\uFF0C\u4F46\u672A\u58F0\u660E\u7EAF mod_skip \u97F3\u9891\u6761\u76EE\uFF1A${root.infoFile.path}`);
     }
@@ -494,6 +562,9 @@ function metadataFromRoots(roots) {
     version: root.info.version,
     relativePath: root.destinationRoot
   }));
+}
+function emptySoundDirectories(roots) {
+  return roots.filter((root) => root.info.customSounds?.length && root.info.customSounds.every((sound) => sound.type === "mod_skip")).map((root) => `${root.destinationRoot}/customSounds`);
 }
 
 // src/redmod/attributes.ts
@@ -508,9 +579,12 @@ async function listFiles(root, current = "") {
   }
   return files;
 }
-async function extractRedmodAttributes(_modInfo, stagingPath) {
+async function extractRedmodAttributes(modInfo, stagingPath) {
   try {
-    const pkg = preparePackage(await listFiles(stagingPath));
+    const info = modInfo;
+    const pkg = preparePackage(await listFiles(stagingPath), {
+      version: String(info?.version || info?.metaInfo?.version || info?.metaInfo?.versionDesc || "")
+    });
     if (pkg.files.some((file) => /(^|\/)fomod\/moduleconfig\.xml$/i.test(file.path))) return {};
     const roots = await findRedmodRoots(
       pkg,
@@ -520,7 +594,8 @@ async function extractRedmodAttributes(_modInfo, stagingPath) {
     for (const root of roots) validateRedmodRoot(pkg, root);
     return {
       cyberpunkRedmodInfo: metadataFromRoots(roots),
-      cyberpunkRedmodRequiresDeploy: true
+      cyberpunkRedmodRequiresDeploy: true,
+      cyberpunkRedmodEmptySoundDirs: emptySoundDirectories(roots)
     };
   } catch {
     return {};
@@ -534,9 +609,11 @@ function invalidFomodRedmod(message, cause) {
   if (cause !== void 0) error.cause = cause;
   return error;
 }
-function normalizeDeploymentPath(value) {
-  const raw = String(value ?? "").replace(/\\/g, "/");
-  if (!raw || raw.startsWith("/") || raw.startsWith("//") || /^[A-Za-z]:/.test(raw)) {
+function normalizeDeploymentPath(value, gamePath) {
+  let raw = String(value ?? "").replace(/\\/g, "/");
+  const gameRoot = String(gamePath || "").replace(/\\/g, "/").replace(/\/+$/, "");
+  if (gameRoot && raw.toLowerCase().startsWith(`${gameRoot.toLowerCase()}/`)) raw = raw.slice(gameRoot.length + 1);
+  if (!raw || raw.startsWith("/") || /^[A-Za-z]:/.test(raw)) {
     throw invalidFomodRedmod(`FOMOD REDmod target path must be relative to the game directory: ${raw}`);
   }
   try {
@@ -549,7 +626,7 @@ function projectSelectedCopies(context) {
   const copiesByDestination = /* @__PURE__ */ new Map();
   for (const instruction of context.instructions) {
     if (instruction.type !== "copy") continue;
-    const destination = normalizeDeploymentPath(instruction.destination);
+    const destination = normalizeDeploymentPath(instruction.destination, context.gamePath);
     const source = normalizeRelativePath2(instruction.source);
     const key = destination.toLowerCase();
     copiesByDestination.delete(key);
@@ -559,7 +636,8 @@ function projectSelectedCopies(context) {
   const firstRoot = files.find((file) => /^mods\/[^/]+\//i.test(file.path))?.path.split("/")[1];
   return {
     files,
-    packageName: sanitizePackageName(firstRoot || "FomodRedmod")
+    packageName: sanitizePackageName(firstRoot || "FomodRedmod"),
+    packageVersion: context.mod?.version
   };
 }
 async function extractFomodRedmodAttributes(contextValue, context) {
@@ -569,7 +647,8 @@ async function extractFomodRedmodAttributes(contextValue, context) {
   if (!hasCanonicalInfo) {
     return {
       cyberpunkRedmodInfo: [],
-      cyberpunkRedmodRequiresDeploy: false
+      cyberpunkRedmodRequiresDeploy: false,
+      cyberpunkRedmodEmptySoundDirs: []
     };
   }
   try {
@@ -587,7 +666,8 @@ async function extractFomodRedmodAttributes(contextValue, context) {
     });
     return {
       cyberpunkRedmodInfo: metadataFromRoots(roots),
-      cyberpunkRedmodRequiresDeploy: roots.length > 0
+      cyberpunkRedmodRequiresDeploy: roots.length > 0,
+      cyberpunkRedmodEmptySoundDirs: emptySoundDirectories(roots)
     };
   } catch (error) {
     if (error?.code === "FOMOD_INVALID_CONFIG") throw error;
@@ -737,6 +817,86 @@ var RedmodSteamLaunchOptionCoordinator = class {
   }
 };
 
+// src/loadOrder/archive.ts
+var import_promises = __toESM(require("fs/promises"));
+var import_path4 = __toESM(require("path"));
+var ARCHIVE_LOAD_ORDER_PROVIDER_ID = "archive";
+function orderArchives(names, listed) {
+  const byLower = new Map(names.map((name) => [name.toLowerCase(), name]));
+  const ordered2 = [...new Set(listed.map((name) => byLower.get(name.toLowerCase())).filter((name) => !!name))];
+  for (const name of names.filter((name2) => !ordered2.includes(name2)).sort()) {
+    const before = ordered2.filter((other) => other < name).sort().pop();
+    const after = [...ordered2].sort()[0];
+    const index = before ? ordered2.indexOf(before) + 1 : after ? ordered2.indexOf(after) : 0;
+    ordered2.splice(index, 0, name);
+  }
+  return ordered2;
+}
+async function diskArchives(gamePath) {
+  try {
+    return (await import_promises.default.readdir(import_path4.default.join(gamePath, PATHS.archive), { withFileTypes: true })).filter((entry) => entry.isFile() && /\.archive$/i.test(entry.name)).map((entry) => entry.name);
+  } catch (error) {
+    if (error.code === "ENOENT") return [];
+    throw error;
+  }
+}
+async function deserializeArchiveLoadOrder(context) {
+  const names = await diskArchives(context.gamePath);
+  let listed;
+  try {
+    listed = (await import_promises.default.readFile(import_path4.default.join(context.gamePath, PATHS.archive, "modlist.txt"), "utf8")).split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  } catch (error) {
+    if (error.code !== "ENOENT") throw error;
+    listed = [];
+  }
+  const status = context.deploymentStatus;
+  if (status && status !== "clean" && context.savedOrder.length) {
+    listed = context.savedOrder.map((id) => id.replace(/^archive:/, ""));
+  }
+  const owners = /* @__PURE__ */ new Map();
+  for (const mod of context.mods) {
+    const paths = mod.deployedPaths || [];
+    for (const target of paths) {
+      const match = target.replace(/\\/g, "/").match(/^archive\/pc\/mod\/([^/]+\.archive)$/i);
+      if (match) owners.set(match[1].toLowerCase(), mod.modKey);
+    }
+  }
+  return orderArchives(names, listed).map((name) => {
+    const ownerModKey = owners.get(name.toLowerCase()) || "";
+    return { id: `archive:${name}`, ownerModKey, name, enabled: true, ...!ownerModKey ? { external: true } : {} };
+  });
+}
+async function serializeArchiveLoadOrder(entries, context) {
+  const names = entries.map((entry) => entry.name);
+  const onDisk = await diskArchives(context.gamePath);
+  if (names.length !== onDisk.length || names.some((name) => !onDisk.includes(name))) {
+    throw new Error("Archive \u6587\u4EF6\u5DF2\u53D8\u5316\uFF0C\u8BF7\u5237\u65B0\u52A0\u8F7D\u987A\u5E8F\u540E\u91CD\u8BD5\u3002");
+  }
+  const target = import_path4.default.join(context.gamePath, PATHS.archive, "modlist.txt");
+  if (names.every((name, index) => index === 0 || names[index - 1] <= name)) {
+    await import_promises.default.rm(target, { force: true });
+  } else {
+    await atomicWrite(target, names.join("\r\n"));
+  }
+}
+function registerArchiveLoadOrder(context) {
+  const registration = {
+    id: ARCHIVE_LOAD_ORDER_PROVIDER_ID,
+    gameId: GAME_ID,
+    title: "Archive \u52A0\u8F7D\u987A\u5E8F",
+    usageInstructions: [
+      "\u4EC5\u5217\u51FA archive/pc/mod \u4E0B\u5DF2\u90E8\u7F72\u7684\u76F4\u63A5 .archive \u6587\u4EF6\uFF0C\u5305\u62EC\u624B\u52A8\u5B89\u88C5\u6587\u4EF6\u3002",
+      "\u8D8A\u9760\u524D\u4F18\u5148\u7EA7\u8D8A\u9AD8\uFF1BArchive \u4F18\u5148\u4E8E REDmod\u3002\u4E00\u822C\u4FDD\u6301\u9ED8\u8BA4 ASCII \u6587\u4EF6\u540D\u987A\u5E8F\u5373\u53EF\u3002",
+      "\u6062\u590D\u6587\u4EF6\u540D\u987A\u5E8F\u540E\u4F1A\u79FB\u9664 modlist.txt\uFF1B\u65B0\u6587\u4EF6\u53CA\u91CD\u65B0\u542F\u7528\u6587\u4EF6\u8FDB\u5165\u5176\u5B57\u6BCD\u90BB\u4F4D\u3002"
+    ],
+    modTypes: Object.values(MOD_TYPE),
+    allowExternalEntries: true,
+    deserializeLoadOrder: deserializeArchiveLoadOrder,
+    serializeLoadOrder: serializeArchiveLoadOrder
+  };
+  context.registerLoadOrder(registration);
+}
+
 // src/loadOrder/index.ts
 function registerRedmodLoadOrder(context) {
   const launchOptions = new RedmodSteamLaunchOptionCoordinator(context);
@@ -753,10 +913,12 @@ function registerRedmodLoadOrder(context) {
     modTypes: [MOD_TYPE.redmod, MOD_TYPE.multiTypeRedmod, MOD_TYPE.fomod],
     isModRelevant: isRedmodLoadOrderModRelevant,
     deserializeLoadOrder: deserializeRedmodLoadOrder,
+    validate: validateRedmodLoadOrder,
     serializeLoadOrder: serializeAndDeployRedmods,
     onDidDeploy: (entries) => launchOptions.afterDeploy(entries)
   });
   context.registerExtensionAction(GAME_ID, "deployRedmods", () => context.api.loadOrder.deploy(REDMOD_LOAD_ORDER_PROVIDER_ID));
+  registerArchiveLoadOrder(context);
 }
 
 // src/requirements/redmod.ts
@@ -792,6 +954,7 @@ function createRedmodSteamPrerequisite(context) {
   return {
     id: "cyberpunk-redmod",
     steamAppId: REDMOD_STEAM_APP_ID,
+    isRequired: ({ mods }) => (mods || []).some(isRedmodLoadOrderModRelevant),
     presentation: {
       title: "\u5B89\u88C5 REDmod",
       content: "REDmod \u662F Cyberpunk 2077 \u7684\u514D\u8D39\u5B98\u65B9 Mod \u5DE5\u5177 DLC\u3002\u8BF7\u5148\u5728 Steam \u4E2D\u5B8C\u6210\u5B89\u88C5\uFF0C\u7136\u540E\u8FD4\u56DE\u6B64\u5904\u91CD\u65B0\u68C0\u67E5\u3002\u666E\u901A\u975E REDmod \u6A21\u7EC4\u4ECD\u53EF\u7EE7\u7EED\u7BA1\u7406\u3002",
@@ -1641,7 +1804,7 @@ var ammCandidate = {
 
 // src/installers/config.ts
 var JSON_PROTECTED_PATHS = /* @__PURE__ */ new Set([
-  ...Object.values(JSON_CANONICAL_PATHS).map((path4) => path4.toLowerCase()),
+  ...Object.values(JSON_CANONICAL_PATHS).map((path6) => path6.toLowerCase()),
   "r6/config/settings/options.json",
   "r6/config/settings/platform/pc/options.json"
 ]);
@@ -1786,72 +1949,6 @@ var REDSCRIPT_DEPRECATED = [
 ];
 var RED4EXT_BASE = ["red4ext/license.txt", "red4ext/red4ext.dll"];
 var RED4EXT_CURRENT_EXTRA = "red4ext/third_party_licenses.txt";
-var INPUT_LOADER_CURRENT = [
-  "engine/config/platform/pc/input_loader.ini",
-  "r6/cache/inputcontexts.xml",
-  "r6/cache/inputusermappings.xml",
-  "red4ext/plugins/input_loader/input_loader.dll",
-  "red4ext/plugins/input_loader/inputusermappings.xml",
-  "red4ext/plugins/input_loader/license.md",
-  "red4ext/plugins/input_loader/readme.md"
-];
-var INPUT_LOADER_011 = [
-  "red4ext/plugins/input_loader/input_loader.dll",
-  "red4ext/plugins/input_loader/inputusermappings.xml",
-  "red4ext/plugins/input_loader/license.md",
-  "red4ext/plugins/input_loader/readme.md",
-  "red4ext/plugins/input_loader_uninstall.bat"
-];
-var INPUT_LOADER_010 = [
-  "red4ext/plugins/input_loader/input_loader.dll",
-  "red4ext/plugins/input_loader/inputusermappings.xml"
-];
-var MOD_SETTINGS = [
-  "red4ext/plugins/mod_settings/modsettings.archive",
-  "red4ext/plugins/mod_settings/modsettings.archive.xl",
-  "red4ext/plugins/mod_settings/mod_settings.dll",
-  "red4ext/plugins/mod_settings/module.reds",
-  "red4ext/plugins/mod_settings/packed.reds",
-  "red4ext/plugins/mod_settings/license.md",
-  "red4ext/plugins/mod_settings/readme.md"
-];
-var TWEAK_XL = [
-  "red4ext/plugins/tweakxl/tweakxl.dll",
-  "red4ext/plugins/tweakxl/scripts/tweakxl.global.reds",
-  "red4ext/plugins/tweakxl/scripts/tweakxl.reds",
-  "red4ext/plugins/tweakxl/data/extraflats.dat",
-  "red4ext/plugins/tweakxl/data/inheritancemap.dat",
-  "red4ext/plugins/tweakxl/license",
-  "red4ext/plugins/tweakxl/third_party_licenses"
-];
-var AUDIOWARE = [
-  "red4ext/plugins/audioware/audioware.dll",
-  ...["Codeware", "Config", "Ext", "Hooks", "Natives", "Preset", "Service", "Settings", "System", "Tween", "Utils"].map((name) => `r6/scripts/audioware/${name.toLowerCase()}.reds`)
-];
-var ARCHIVE_XL = [
-  "r6/config/redsuserhints/archivexl.toml",
-  "red4ext/plugins/archivexl/archivexl.dll",
-  "red4ext/plugins/archivexl/bundle/archivexl.archive",
-  "red4ext/plugins/archivexl/bundle/photomodescope.xl",
-  "red4ext/plugins/archivexl/bundle/playerbasescope.xl",
-  "red4ext/plugins/archivexl/bundle/playercustomizationbeardfix.xl",
-  "red4ext/plugins/archivexl/bundle/playercustomizationbeardscope.xl",
-  "red4ext/plugins/archivexl/bundle/playercustomizationbrowsfix.xl",
-  "red4ext/plugins/archivexl/bundle/playercustomizationbrowspatch.xl",
-  "red4ext/plugins/archivexl/bundle/playercustomizationbrowsscope.xl",
-  "red4ext/plugins/archivexl/bundle/playercustomizationhairfix.xl",
-  "red4ext/plugins/archivexl/bundle/playercustomizationhairpatch.xl",
-  "red4ext/plugins/archivexl/bundle/playercustomizationhairscope.xl",
-  "red4ext/plugins/archivexl/bundle/playercustomizationlashesfix.xl",
-  "red4ext/plugins/archivexl/bundle/playercustomizationlashespatch.xl",
-  "red4ext/plugins/archivexl/bundle/playercustomizationlashesscope.xl",
-  "red4ext/plugins/archivexl/bundle/playercustomizationscope.xl",
-  "red4ext/plugins/archivexl/bundle/questbasescope.xl",
-  "red4ext/plugins/archivexl/license",
-  "red4ext/plugins/archivexl/scripts/archivexl.global.reds",
-  "red4ext/plugins/archivexl/scripts/archivexl.reds",
-  "red4ext/plugins/archivexl/third_party_licenses"
-];
 var CYBERCAT_EXECUTABLE = "cp2077saveeditor.exe";
 var CYBERCAT = [
   CYBERCAT_EXECUTABLE,
@@ -1862,12 +1959,6 @@ var CYBERCAT = [
   "presentationnative_cor3.dll",
   "vcruntime140_cor3.dll",
   "wpfgfx_cor3.dll"
-];
-var AMM_CORE = [
-  `${PATHS.amm}/init.lua`,
-  `${PATHS.amm}/db.sqlite3`,
-  `${PATHS.amm}/collabs/api.lua`,
-  `${PATHS.archive}/basegame_amm_props.archive`
 ];
 var CYBERSCRIPT = [
   "bin/x64/plugins/immersiveroleplayframework.asi",
@@ -1888,6 +1979,14 @@ function strictCandidate(id, modTypeId, marker, required) {
       if (!hasAllPaths(input.pkg.files, required)) missing(id);
       return success(input, modTypeId);
     }
+  };
+}
+function markerCandidate(id, modTypeId, marker) {
+  return {
+    id,
+    modTypeId,
+    matches: ({ pkg }) => hasPath(pkg.files, marker),
+    install: (input) => success(input, modTypeId)
   };
 }
 var coreCet = {
@@ -1939,27 +2038,6 @@ var blockedWolvenKit = {
     throw new Error("WolvenKit CLI/Desktop \u4E0D\u80FD\u4F5C\u4E3A\u6E38\u620F Mod \u5B89\u88C5\u3002");
   }
 };
-var coreInputLoader = {
-  id: "Core Input Loader",
-  modTypeId: MOD_TYPE.coreInputLoader,
-  matches: ({ pkg }) => hasPath(pkg.files, "red4ext/plugins/input_loader/input_loader.dll"),
-  install: async (input) => {
-    if (hasAllPaths(input.pkg.files, INPUT_LOADER_CURRENT)) return success(input, MOD_TYPE.coreInputLoader);
-    const is011 = hasAllPaths(input.pkg.files, INPUT_LOADER_011);
-    const is010 = hasAllPaths(input.pkg.files, INPUT_LOADER_010);
-    if (!is011 && !is010) missing("Input Loader");
-    await confirmInstall(input.context, "\u65E7\u7248 Input Loader", "\u8BE5\u538B\u7F29\u5305\u4F7F\u7528\u65E7\u7248 Input Loader \u5E03\u5C40\uFF0C\u5C06\u8865\u5145 input_loader.ini\u3002");
-    const instructions = copySame(input.pkg.files);
-    if (!hasPath(input.pkg.files, "engine/config/platform/pc/input_loader.ini")) {
-      instructions.unshift({
-        type: "generatefile",
-        data: "[Player/Input]\n",
-        destination: "engine/config/platform/pc/input_loader.ini"
-      });
-    }
-    return { modTypeId: MOD_TYPE.coreInputLoader, instructions };
-  }
-};
 var coreCyberCat = {
   id: "Core CyberCAT",
   modTypeId: MOD_TYPE.coreCyberCat,
@@ -1979,13 +2057,13 @@ var CORE_CANDIDATES = [
   coreRed4ext,
   blockedCsvMerge,
   blockedWolvenKit,
-  strictCandidate("Core Audioware", MOD_TYPE.coreAudioware, AUDIOWARE[0], AUDIOWARE),
-  strictCandidate("Core TweakXL", MOD_TYPE.coreTweakXL, TWEAK_XL[0], TWEAK_XL),
-  strictCandidate("Core ArchiveXL", MOD_TYPE.coreArchiveXL, ARCHIVE_XL[1], ARCHIVE_XL),
-  coreInputLoader,
-  strictCandidate("Core Mod Settings", MOD_TYPE.coreModSettings, MOD_SETTINGS[2], MOD_SETTINGS),
+  markerCandidate("Core Audioware", MOD_TYPE.coreAudioware, "red4ext/plugins/audioware/audioware.dll"),
+  markerCandidate("Core TweakXL", MOD_TYPE.coreTweakXL, "red4ext/plugins/tweakxl/tweakxl.dll"),
+  markerCandidate("Core ArchiveXL", MOD_TYPE.coreArchiveXL, "red4ext/plugins/archivexl/archivexl.dll"),
+  markerCandidate("Core Input Loader", MOD_TYPE.coreInputLoader, "red4ext/plugins/input_loader/input_loader.dll"),
+  markerCandidate("Core Mod Settings", MOD_TYPE.coreModSettings, "red4ext/plugins/mod_settings/mod_settings.dll"),
   coreCyberCat,
-  strictCandidate("Core Appearance Menu Mod", MOD_TYPE.coreAmm, AMM_CORE[0], AMM_CORE),
+  markerCandidate("Core Appearance Menu Mod", MOD_TYPE.coreAmm, `${PATHS.amm}/init.lua`),
   strictCandidate("Core CyberScript", MOD_TYPE.coreCyberScript, CYBERSCRIPT[0], CYBERSCRIPT)
 ];
 
@@ -2025,7 +2103,7 @@ function hasRedscript(files, canonicalOnly = false) {
   const hasScripts = files.some((file) => file.lower.startsWith(REDSCRIPT_PREFIX) && extname(file.path) === ".reds");
   const hasHints = files.some((file) => isUnder(file, PATHS.redscriptHints) && extname(file.path) === ".toml");
   const topLevel = !canonicalOnly && files.some((file) => !file.path.includes("/") && extname(file.path) === ".reds");
-  return hasScripts || hasHints || topLevel;
+  return hasScripts || hasHints || topLevel || files.some((file) => isUnder(file, PATHS.redscriptStorages));
 }
 function hasTweakXL(files) {
   return files.some((file) => isUnder(file, PATHS.tweakXL) && [".yaml", ".yml"].includes(extname(file.path)));
@@ -2075,10 +2153,12 @@ function mapRedscriptFiles(input, mapped, canonicalOnly = false) {
     mapInstruction(mapped, file, destination);
   }
   mapSame(mapped, filesUnder(input.pkg.files, PATHS.redscriptHints).filter((file) => extname(file.path) === ".toml"));
+  mapSame(mapped, filesUnder(input.pkg.files, PATHS.redscriptStorages));
   if (!canonicalOnly) {
     const topLevelReds = input.pkg.files.filter((file) => !file.path.includes("/") && extname(file.path) === ".reds");
     if (topLevelReds.length > 0) {
       for (const file of input.pkg.files) {
+        if (isUnder(file, PATHS.redscriptHints) || isUnder(file, PATHS.redscriptStorages)) continue;
         mapInstruction(mapped, file, `${PATHS.redscript}/${input.pkg.packageName}/${file.path}`);
       }
     }
@@ -2231,7 +2311,8 @@ async function mapRedmods(input, mapped, canonicalOnly = false) {
   });
   return [
     { type: "attribute", key: "cyberpunkRedmodInfo", value: metadataFromRoots(roots) },
-    { type: "attribute", key: "cyberpunkRedmodRequiresDeploy", value: true }
+    { type: "attribute", key: "cyberpunkRedmodRequiresDeploy", value: true },
+    { type: "attribute", key: "cyberpunkRedmodEmptySoundDirs", value: emptySoundDirectories(roots) }
   ];
 }
 var redmodCandidate = {
@@ -2380,8 +2461,8 @@ var PIPELINE = [
 function testCyberpunkPackage(_files, gameId) {
   return { supported: Number(gameId) === GAME_ID };
 }
-async function installCyberpunkPackage(context, files, stagingPath = "") {
-  const input = { context, pkg: preparePackage(files), stagingPath };
+async function installCyberpunkPackage(context, files, stagingPath = "", options) {
+  const input = { context, pkg: preparePackage(files, options?.mod), stagingPath };
   if (input.pkg.files.length === 0) throw new Error("Mod archive does not contain installable files.");
   for (const candidate of PIPELINE) {
     if (await candidate.matches(input)) return candidate.install(input);
@@ -2416,8 +2497,33 @@ function registerCyberpunkModTypes(context) {
     MOD_TYPE.pipeline,
     30,
     testCyberpunkPackage,
-    (files, stagingPath) => installCyberpunkPackage(context, files, stagingPath)
+    (files, stagingPath, options) => installCyberpunkPackage(context, files, stagingPath, options)
   );
+}
+
+// src/deploymentDirectories.ts
+var import_promises2 = __toESM(require("fs/promises"));
+var import_path5 = __toESM(require("path"));
+var FRAMEWORK_DIRECTORIES = {
+  [MOD_TYPE.coreAudioware]: PATHS.audioware,
+  [MOD_TYPE.coreTweakXL]: PATHS.tweakXL,
+  [MOD_TYPE.coreInputLoader]: PATHS.xmlInput
+};
+async function prepareDeploymentDirectories(payload) {
+  const gamePath = String(payload.gamePath || "");
+  if (!gamePath) return;
+  const frameworkDirectory = FRAMEWORK_DIRECTORIES[String(payload.modType || "")];
+  const mod = payload.mod;
+  const declared = mod?.metaInfo?.cyberpunkRedmodEmptySoundDirs;
+  const sounds = Array.isArray(declared) ? declared.filter((value) => {
+    if (typeof value !== "string") return false;
+    const match = value.match(/^mods\/([^/\\:]+)\/customSounds$/);
+    return Boolean(match && !/[. ]$/.test(match[1]));
+  }) : [];
+  await Promise.all([...sounds, ...frameworkDirectory ? [frameworkDirectory] : []].map((relative) => import_promises2.default.mkdir(import_path5.default.join(gamePath, relative), { recursive: true })));
+}
+function registerDeploymentDirectories(context) {
+  context.registerManagedDeploymentHook("afterEnable", {}, prepareDeploymentDirectories);
 }
 
 // src/index.ts
@@ -2425,6 +2531,7 @@ async function main(context) {
   registerCyberpunkGame(context);
   registerCyberpunkModTypes(context);
   registerRedmodLoadOrder(context);
+  registerDeploymentDirectories(context);
   return true;
 }
 var src_default = main;

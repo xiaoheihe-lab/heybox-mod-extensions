@@ -40,7 +40,7 @@ test('Cyberpunk 2077 general installer and registration regressions', async () =
   assert.equal(redmodPrerequisite.steamAppId, REDMOD_STEAM_APP_ID)
   assert.equal(redmodPrerequisite.presentation.imageUrl, REDMOD_STEAM_HEADER_IMAGE)
   assert.equal(redmodPrerequisite.presentation.installButtonText, '前往 Steam 安装')
-  assert.equal(redmodPrerequisite.presentation.recheckButtonText, '安装完成，重新检查')
+  assert.equal(redmodPrerequisite.presentation.recheckButtonText, '重新检查')
   assert.equal(registrations.installers.length, 2)
   assert.deepEqual(registrations.installers[0], { id: MOD_TYPE.fomod, priority: 100 })
   assert.deepEqual(registrations.installers[1], { id: MOD_TYPE.pipeline, priority: 30 })
@@ -59,7 +59,7 @@ test('Cyberpunk 2077 general installer and registration regressions', async () =
     registerLoadOrder: (options: any) => loadOrderRegistrations.push(options),
     registerExtensionAction: (gameId: number, action: string) => deploymentActions.push({ gameId, action }),
   } as any)
-  assert.equal(loadOrderRegistrations.length, 1)
+  assert.equal(loadOrderRegistrations.length, 2)
   assert.deepEqual(loadOrderRegistrations[0].modTypes, [MOD_TYPE.redmod, MOD_TYPE.multiTypeRedmod, MOD_TYPE.fomod])
   assert.equal(typeof loadOrderRegistrations[0].onDidDeploy, 'function')
   assert.equal(extractors[0].priority, 100)

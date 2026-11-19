@@ -10,6 +10,7 @@ import type {
 import { finalizeMappedInstall, mapInstruction, readText } from './shared'
 import {
   findRedmodRoots,
+  emptySoundDirectories,
   hasRedmodInfo,
   metadataFromRoots,
   relativeFromRedmodRoot,
@@ -45,6 +46,7 @@ export async function mapRedmods(
   return [
     { type: 'attribute', key: 'cyberpunkRedmodInfo', value: metadataFromRoots(roots) },
     { type: 'attribute', key: 'cyberpunkRedmodRequiresDeploy', value: true },
+    { type: 'attribute', key: 'cyberpunkRedmodEmptySoundDirs', value: emptySoundDirectories(roots) },
   ]
 }
 

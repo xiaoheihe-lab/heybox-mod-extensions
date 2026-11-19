@@ -2,9 +2,15 @@ import type { IExtensionContext } from 'heybox-mod-api'
 import { GAME_ID, MOD_TYPE } from '../constants'
 import { extractRedmodAttributes } from '../redmod/attributes'
 import { serializeAndDeployRedmods } from './deployer'
-import { deserializeRedmodLoadOrder, isRedmodLoadOrderModRelevant, REDMOD_LOAD_ORDER_PROVIDER_ID } from './provider'
+import {
+  deserializeRedmodLoadOrder,
+  isRedmodLoadOrderModRelevant,
+  REDMOD_LOAD_ORDER_PROVIDER_ID,
+  validateRedmodLoadOrder,
+} from './provider'
 import { registerFomodRedmodAttributeExtractor } from '../redmod/fomodAttributes'
 import { RedmodSteamLaunchOptionCoordinator } from '../launchOptions'
+import { registerArchiveLoadOrder } from './archive'
 
 export function registerRedmodLoadOrder(context: IExtensionContext): void {
   const launchOptions = new RedmodSteamLaunchOptionCoordinator(context)
@@ -21,8 +27,10 @@ export function registerRedmodLoadOrder(context: IExtensionContext): void {
     modTypes: [MOD_TYPE.redmod, MOD_TYPE.multiTypeRedmod, MOD_TYPE.fomod],
     isModRelevant: isRedmodLoadOrderModRelevant,
     deserializeLoadOrder: deserializeRedmodLoadOrder,
+    validate: validateRedmodLoadOrder,
     serializeLoadOrder: serializeAndDeployRedmods,
     onDidDeploy: (entries) => launchOptions.afterDeploy(entries),
   })
   context.registerExtensionAction(GAME_ID, 'deployRedmods', () => context.api.loadOrder.deploy(REDMOD_LOAD_ORDER_PROVIDER_ID))
+  registerArchiveLoadOrder(context)
 }

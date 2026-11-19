@@ -6,7 +6,7 @@ export interface RedmodInfoFile {
   name: string
   version: string
   description?: string
-  customSounds?: Array<{ name?: string, type?: string }>
+  customSounds?: Array<{ name: string, type: string, file?: string, gain?: number, pitch?: number }>
 }
 
 export interface RedmodMetadata {
@@ -34,7 +34,10 @@ export function hasRedmodInfo(files: PackageFile[], canonicalOnly = false): bool
   })
 }
 
-async function decodeInfo(file: PackageFile, readText: (file: PackageFile) => Promise<string>): Promise<RedmodInfoFile> {
+const SOUND_TYPES = new Set(['mod_skip', 'mod_sfx_2d', 'mod_sfx_city', 'mod_sfx_low_occlusion',
+  'mod_sfx_occlusion', 'mod_sfx_radio', 'mod_sfx_room', 'mod_sfx_street', 'mod_sfx_ui'])
+
+async function decodeInfo(file: PackageFile, readText: (file: PackageFile) => Promise<string>, version?: string): Promise<RedmodInfoFile> {
   let value: unknown
   try {
     value = JSON.parse(await readText(file))
@@ -42,10 +45,17 @@ async function decodeInfo(file: PackageFile, readText: (file: PackageFile) => Pr
     throw new Error(`REDmod info.json 无法解析：${file.path} (${String(error)})`)
   }
   const info = value as Partial<RedmodInfoFile>
-  if (!info || typeof info.name !== 'string' || !info.name.trim() || typeof info.version !== 'string' || !info.version.trim()) {
+  if (!info || typeof info.name !== 'string' || !info.name.trim() || typeof info.version !== 'string') {
     throw new Error(`REDmod info.json 缺少有效的 name/version：${file.path}`)
   }
-  return info as RedmodInfoFile
+  if (info.description !== undefined && typeof info.description !== 'string') throw new Error(`REDmod description 无效：${file.path}`)
+  if (info.customSounds !== undefined && (!Array.isArray(info.customSounds) || info.customSounds.some((sound) =>
+    !sound || typeof sound.name !== 'string' || !SOUND_TYPES.has(sound.type)
+    || (sound.file !== undefined && typeof sound.file !== 'string')
+    || (sound.gain !== undefined && (typeof sound.gain !== 'number' || !Number.isFinite(sound.gain)))
+    || (sound.pitch !== undefined && (typeof sound.pitch !== 'number' || !Number.isFinite(sound.pitch)))
+  ))) throw new Error(`REDmod customSounds 声明无效：${file.path}`)
+  return { ...info, version: info.version || version || '' } as RedmodInfoFile
 }
 
 export async function findRedmodRoots(
@@ -70,7 +80,7 @@ export async function findRedmodRoots(
     }
     if (sourceRoot === null) continue
 
-    const info = await decodeInfo(file, readText)
+    const info = await decodeInfo(file, readText, pkg.packageVersion)
     destinationRoot ||= `mods/${sanitizePackageName(info.name || pkg.packageName)}`
     roots.push({ infoFile: file, sourceRoot, destinationRoot, info })
   }
@@ -109,8 +119,14 @@ export function validateRedmodRoot(pkg: PreparedPackage, root: RedmodRoot): Pack
 
   const rootFiles = scopedFiles.filter((file) => isValidRedmodFile(relativeFromRedmodRoot(file, root.sourceRoot) || ''))
   const payloadFiles = rootFiles.filter((file) => file.source !== root.infoFile.source)
+  const sounds = root.info.customSounds || []
+  const requiresSoundFiles = sounds.some((sound) => sound.type !== 'mod_skip')
+  const hasSoundFiles = payloadFiles.some((file) =>
+    (relativeFromRedmodRoot(file, root.sourceRoot) || '').toLowerCase().startsWith('customsounds/'))
+  if (requiresSoundFiles !== hasSoundFiles) {
+    throw new Error(`REDmod customSounds 声明与音频文件不一致：${root.infoFile.path}`)
+  }
   if (payloadFiles.length === 0) {
-    const sounds = Array.isArray(root.info.customSounds) ? root.info.customSounds : []
     if (sounds.length === 0 || sounds.some((sound) => sound?.type !== 'mod_skip')) {
       throw new Error(`REDmod 只有 info.json，但未声明纯 mod_skip 音频条目：${root.infoFile.path}`)
     }
@@ -124,4 +140,10 @@ export function metadataFromRoots(roots: RedmodRoot[]): RedmodMetadata[] {
     version: root.info.version,
     relativePath: root.destinationRoot,
   }))
+}
+
+export function emptySoundDirectories(roots: RedmodRoot[]): string[] {
+  return roots.filter((root) => root.info.customSounds?.length
+    && root.info.customSounds.every((sound) => sound.type === 'mod_skip'))
+    .map((root) => `${root.destinationRoot}/customSounds`)
 }

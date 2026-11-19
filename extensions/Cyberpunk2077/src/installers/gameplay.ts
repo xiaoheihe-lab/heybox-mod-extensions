@@ -41,7 +41,7 @@ export function hasRedscript(files: PackageFile[], canonicalOnly = false): boole
   const hasScripts = files.some((file) => file.lower.startsWith(REDSCRIPT_PREFIX) && extname(file.path) === '.reds')
   const hasHints = files.some((file) => isUnder(file, PATHS.redscriptHints) && extname(file.path) === '.toml')
   const topLevel = !canonicalOnly && files.some((file) => !file.path.includes('/') && extname(file.path) === '.reds')
-  return hasScripts || hasHints || topLevel
+  return hasScripts || hasHints || topLevel || files.some((file) => isUnder(file, PATHS.redscriptStorages))
 }
 
 export function hasTweakXL(files: PackageFile[]): boolean {
@@ -109,11 +109,13 @@ export function mapRedscriptFiles(
     mapInstruction(mapped, file, destination)
   }
   mapSame(mapped, filesUnder(input.pkg.files, PATHS.redscriptHints).filter((file) => extname(file.path) === '.toml'))
+  mapSame(mapped, filesUnder(input.pkg.files, PATHS.redscriptStorages))
 
   if (!canonicalOnly) {
     const topLevelReds = input.pkg.files.filter((file) => !file.path.includes('/') && extname(file.path) === '.reds')
     if (topLevelReds.length > 0) {
       for (const file of input.pkg.files) {
+        if (isUnder(file, PATHS.redscriptHints) || isUnder(file, PATHS.redscriptStorages)) continue
         mapInstruction(mapped, file, `${PATHS.redscript}/${input.pkg.packageName}/${file.path}`)
       }
     }
