@@ -25,6 +25,15 @@ importers:
         specifier: ^5.7.0
         version: 5.9.3
 
+  extensions/CodeVein:
+    devDependencies:
+      heybox-mod-api:
+        specifier: 1.17.0
+        version: 1.17.0
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
+
   extensions/Cyberpunk2077:
     dependencies:
       '@heybox-mod-extensions/fomod-utils':
@@ -80,11 +89,29 @@ importers:
         specifier: ^5.7.0
         version: 5.9.3
 
+  extensions/Invokyr:
+    devDependencies:
+      heybox-mod-api:
+        specifier: 1.17.0
+        version: 1.17.0
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
+
   extensions/Kenshi:
     devDependencies:
       heybox-mod-api:
         specifier: 1.8.0
         version: 1.8.0
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
+
+  extensions/LiesOfP:
+    devDependencies:
+      heybox-mod-api:
+        specifier: 1.17.0
+        version: 1.17.0
       typescript:
         specifier: ^5.7.0
         version: 5.9.3
@@ -120,6 +147,33 @@ importers:
       heybox-mod-api:
         specifier: 1.8.0
         version: 1.8.0
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
+
+  extensions/PhantomBladeZero:
+    devDependencies:
+      heybox-mod-api:
+        specifier: 1.17.0
+        version: 1.17.0
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
+
+  extensions/ProbablyStolen:
+    devDependencies:
+      heybox-mod-api:
+        specifier: 1.17.0
+        version: 1.17.0
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
+
+  extensions/ProjectWingman:
+    devDependencies:
+      heybox-mod-api:
+        specifier: 1.17.0
+        version: 1.17.0
       typescript:
         specifier: ^5.7.0
         version: 5.9.3
@@ -198,6 +252,15 @@ importers:
         specifier: ^5.7.0
         version: 5.9.3
 
+  extensions/Sifu:
+    devDependencies:
+      heybox-mod-api:
+        specifier: 1.17.0
+        version: 1.17.0
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
+
   extensions/SlayTheSpire2:
     devDependencies:
       heybox-mod-api:
@@ -221,6 +284,15 @@ importers:
       heybox-mod-api:
         specifier: 1.9.0
         version: 1.9.0
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
+
+  extensions/Stray:
+    devDependencies:
+      heybox-mod-api:
+        specifier: 1.17.0
+        version: 1.17.0
       typescript:
         specifier: ^5.7.0
         version: 5.9.3
@@ -254,6 +326,27 @@ importers:
       heybox-mod-api:
         specifier: 1.6.0-alpha1
         version: 1.6.0-alpha1
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
+
+  extensions/Wuchang:
+    devDependencies:
+      '@types/node':
+        specifier: ^22.0.0
+        version: 22.20.1
+      heybox-mod-api:
+        specifier: 1.17.0
+        version: 1.17.0
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
+
+  extensions/X4Foundations:
+    devDependencies:
+      heybox-mod-api:
+        specifier: 1.8.0
+        version: 1.8.0
       typescript:
         specifier: ^5.7.0
         version: 5.9.3
